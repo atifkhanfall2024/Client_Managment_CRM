@@ -15,10 +15,15 @@ const DARK_VIDEO =
 const DARK_POSTER =
   "https://images.pexels.com/videos/3129957/free-video-3129957.jpg?auto=compress&cs=tinysrgb&w=1920";
 
-export function HeroVideoBackground() {
+export function HeroVideoBackground({
+  variant = "landing",
+}: {
+  variant?: "landing" | "auth";
+}) {
   const ref = useRef<HTMLVideoElement>(null);
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const isAuth = variant === "auth";
 
   useEffect(() => setMounted(true), []);
 
@@ -40,7 +45,7 @@ export function HeroVideoBackground() {
       <video
         key={src}
         ref={ref}
-        className="absolute inset-0 h-full w-full scale-105 object-cover"
+        className="absolute inset-0 h-full w-full scale-110 object-cover motion-safe:animate-[auth-video-drift_28s_ease-in-out_infinite_alternate]"
         autoPlay
         muted
         loop
@@ -53,15 +58,34 @@ export function HeroVideoBackground() {
       </video>
 
       {/* Light: soft steel wash */}
-      <div className="absolute inset-0 bg-[#c5d3e4]/72 dark:hidden" />
-      <div className="absolute inset-0 bg-gradient-to-br from-[#24548c]/20 via-[#d0dbe8]/45 to-[#b8cce3]/65 dark:hidden" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(36,84,140,0.18),_transparent_55%)] dark:hidden" />
+      <div
+        className={
+          isAuth
+            ? "absolute inset-0 bg-[#b7c8dc]/78 dark:hidden"
+            : "absolute inset-0 bg-[#c5d3e4]/72 dark:hidden"
+        }
+      />
+      <div className="absolute inset-0 bg-gradient-to-br from-[#24548c]/25 via-[#d0dbe8]/40 to-[#b8cce3]/70 dark:hidden" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(36,84,140,0.22),_transparent_55%)] dark:hidden" />
 
       {/* Dark: deep charcoal wash */}
-      <div className="absolute inset-0 hidden bg-[#0b1018]/80 dark:block" />
-      <div className="absolute inset-0 hidden bg-gradient-to-br from-[#24548c]/35 via-transparent to-[#0b1018]/70 dark:block" />
+      <div
+        className={
+          isAuth
+            ? "absolute inset-0 hidden bg-[#0b1018]/84 dark:block"
+            : "absolute inset-0 hidden bg-[#0b1018]/80 dark:block"
+        }
+      />
+      <div className="absolute inset-0 hidden bg-gradient-to-br from-[#24548c]/40 via-transparent to-[#0b1018]/75 dark:block" />
 
-      <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-[var(--background)] via-[var(--background)]/70 to-transparent" />
+      {isAuth ? (
+        <>
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(36,84,140,0.35),transparent_42%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_80%,rgba(212,222,234,0.12),transparent_40%)]" />
+        </>
+      ) : (
+        <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-[var(--background)] via-[var(--background)]/70 to-transparent" />
+      )}
     </div>
   );
 }

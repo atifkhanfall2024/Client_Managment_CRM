@@ -76,6 +76,9 @@ export async function getTasks(params?: {
   mine?: boolean;
 }) {
   const profile = await requireProfile();
+  if (profile.role === "client") {
+    throw new Error("Use the client portal for your tasks");
+  }
   await connectMongo();
   const page = params?.page ?? 1;
   const filter: Record<string, unknown> = { deleted_at: null };

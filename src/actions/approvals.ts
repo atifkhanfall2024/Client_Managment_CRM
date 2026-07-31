@@ -6,25 +6,18 @@ import { connectMongo } from "@/lib/mongodb";
 import { UserModel } from "@/lib/auth/user-model";
 import { createNotification } from "@/lib/activity";
 import { hasPermission } from "@/lib/rbac";
+import {
+  canApproveTarget,
+  homeLinkForApprovedRole,
+  pendingRolesForActor,
+} from "@/lib/security/approvals-policy";
 import type { ActionResult } from "@/core/types/result";
 import type { UserRole } from "@/types/database";
-
-function canApproveTarget(actorRole: UserRole, targetRole: UserRole) {
-  if (actorRole === "super_admin") return targetRole !== "super_admin";
-  if (actorRole === "admin") {
-    return targetRole === "manager" || targetRole === "employee";
-  }
-  if (actorRole === "manager") {
-    return targetRole === "employee";
-  }
-  return false;
-}
 
 export async function getPendingUsers() {
   const profile = await requireProfile();
   await connectMongo();
 
-  // Older accounts may lack approval_status — treat as pending
   await UserModel.updateMany(
     {
       role: { $ne: "super_admin" },
@@ -33,22 +26,16 @@ export async function getPendingUsers() {
     { $set: { approval_status: "pending" } }
   );
 
-  const filter: Record<string, unknown> = {
+  const roles = pendingRolesForActor(profile.role);
+  if (!roles) return [];
+
+  const rows = await UserModel.find({
     approval_status: "pending",
+    role: { $in: roles },
     $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }],
-  };
-
-  if (profile.role === "super_admin") {
-    filter.role = { $in: ["admin", "manager", "employee"] };
-  } else if (profile.role === "admin") {
-    filter.role = { $in: ["manager", "employee"] };
-  } else if (profile.role === "manager") {
-    filter.role = "employee";
-  } else {
-    return [];
-  }
-
-  const rows = await UserModel.find(filter).sort({ created_at: -1 }).lean();
+  })
+    .sort({ created_at: -1 })
+    .lean();
 
   return rows.map((u) => ({
     id: String(u.id),
@@ -85,17 +72,22 @@ export async function approveUserAction(userId: string): Promise<ActionResult> {
     }
   );
 
+  const link = homeLinkForApprovedRole(target.role as UserRole);
   await createNotification({
     user_id: userId,
     title: "Account approved",
-    message: `Your ${String(target.role).replace("_", " ")} account was approved. You can access the dashboard now.`,
-    link: "/dashboard",
+    message:
+      target.role === "client"
+        ? "Your client portal access was approved. You can track your projects now."
+        : `Your ${String(target.role).replace("_", " ")} account was approved. You can access the dashboard now.`,
+    link,
   });
 
   revalidatePath("/approvals");
   revalidatePath("/users");
   revalidatePath("/dashboard");
   revalidatePath("/pending");
+  revalidatePath("/portal");
   return { success: true };
 }
 
@@ -147,9 +139,14 @@ export async function notifyApproversOfRegistration(params: {
     approverFilter.role = "super_admin";
   } else if (params.role === "manager") {
     approverFilter.role = { $in: ["super_admin", "admin"] };
+  } else if (params.role === "client") {
+    approverFilter.role = { $in: ["super_admin", "admin"] };
   } else {
     approverFilter.role = { $in: ["super_admin", "admin", "manager"] };
   }
+
+  const label =
+    params.role === "client" ? "client portal" : params.role.replace("_", " ");
 
   const approvers = await UserModel.find(approverFilter).select("id").lean();
   await Promise.all(
@@ -157,7 +154,7 @@ export async function notifyApproversOfRegistration(params: {
       createNotification({
         user_id: String(a.id),
         title: "New approval request",
-        message: `${params.full_name} (${params.email}) registered as ${params.role.replace("_", " ")}.`,
+        message: `${params.full_name} (${params.email}) needs approval as ${label}.`,
         type: "approval",
         link: "/approvals",
       })

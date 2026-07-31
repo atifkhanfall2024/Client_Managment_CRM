@@ -22,6 +22,17 @@ export function formatDate(date: string | Date | null | undefined) {
   }).format(new Date(date));
 }
 
+export function formatDateTime(date: string | Date | null | undefined) {
+  if (!date) return "—";
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(date));
+}
+
 export function exportToCsv<T extends Record<string, unknown>>(
   rows: T[],
   filename: string

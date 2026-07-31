@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { registerAction } from "@/actions/auth";
 import { AuthForm } from "@/components/auth/auth-form";
-import { ThemeToggle } from "@/components/shared/theme-toggle";
+import { AuthShell } from "@/components/auth/auth-shell";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -11,12 +11,7 @@ export const metadata = { title: "Create account" };
 
 export default function RegisterPage() {
   return (
-    <main className="mesh-bg relative flex min-h-screen items-center justify-center px-4 py-12">
-      <div className="absolute right-4 top-4 z-20">
-        <ThemeToggle />
-      </div>
-      <div className="pointer-events-none absolute left-8 top-20 h-56 w-56 rounded-full bg-brand/15 blur-3xl animate-float" />
-      <div className="pointer-events-none absolute bottom-8 right-8 h-64 w-64 rounded-full bg-foreground/10 blur-3xl animate-float" />
+    <AuthShell>
       <AuthForm
         action={registerAction}
         title="Join the workspace"
@@ -25,7 +20,10 @@ export default function RegisterPage() {
         footer={
           <p className="text-muted">
             Already have an account?{" "}
-            <Link href="/login" className="font-semibold text-brand hover:underline">
+            <Link
+              href="/login"
+              className="font-semibold text-brand hover:underline"
+            >
               Sign in
             </Link>
           </p>
@@ -37,7 +35,13 @@ export default function RegisterPage() {
         </div>
         <div className="space-y-2">
           <Label htmlFor="email">Work email</Label>
-          <Input id="email" name="email" type="email" required className="h-11" />
+          <Input
+            id="email"
+            name="email"
+            type="email"
+            required
+            className="h-11"
+          />
         </div>
         <div className="space-y-2">
           <Label htmlFor="password">Password</Label>
@@ -65,6 +69,6 @@ export default function RegisterPage() {
           </p>
         </div>
       </AuthForm>
-    </main>
+    </AuthShell>
   );
 }

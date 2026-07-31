@@ -40,7 +40,7 @@ export function AuthForm({
   const [state, formAction] = useActionState(action, null);
 
   return (
-    <div className="w-full max-w-md animate-rise overflow-hidden rounded-3xl border border-border bg-card/90 p-8 shadow-xl backdrop-blur-xl">
+    <div className="w-full max-w-md animate-rise overflow-hidden rounded-3xl border border-white/20 bg-card/85 p-8 shadow-2xl shadow-brand/10 backdrop-blur-2xl dark:border-white/10 dark:bg-card/80">
       <div className="mb-8 space-y-2">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand">
           {APP_NAME}

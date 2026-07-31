@@ -1,4 +1,9 @@
-export type UserRole = "super_admin" | "admin" | "manager" | "employee";
+export type UserRole =
+  | "super_admin"
+  | "admin"
+  | "manager"
+  | "employee"
+  | "client";
 export type ApprovalStatus = "pending" | "approved" | "rejected";
 export type ClientStatus = "lead" | "active" | "inactive" | "archived";
 export type PriorityLevel = "low" | "medium" | "high" | "urgent";
@@ -9,13 +14,15 @@ export type ProjectStatus =
   | "completed"
   | "cancelled";
 export type TaskStatus = "todo" | "in_progress" | "review" | "done" | "cancelled";
+export type MeetingStatus = "scheduled" | "completed" | "cancelled";
 export type EntityType =
   | "client"
   | "company"
   | "project"
   | "task"
   | "user"
-  | "document";
+  | "document"
+  | "meeting";
 
 export interface Profile {
   id: string;
@@ -64,6 +71,7 @@ export interface Client {
   priority: PriorityLevel;
   created_by: string | null;
   assigned_manager_id: string | null;
+  portal_user_id: string | null;
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
@@ -161,6 +169,28 @@ export interface Notification {
   link: string | null;
   read_at: string | null;
   created_at: string;
+}
+
+export interface ProjectMeeting {
+  id: string;
+  project_id: string;
+  client_id: string;
+  title: string;
+  agenda: string | null;
+  notes: string | null;
+  scheduled_at: string;
+  duration_minutes: number;
+  location: string | null;
+  meeting_url: string | null;
+  status: MeetingStatus;
+  created_by: string | null;
+  manager_id: string | null;
+  visible_to_client: boolean;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+  project?: { id: string; name: string } | null;
+  manager?: { id: string; full_name: string; email: string } | null;
 }
 
 export interface DashboardStats {

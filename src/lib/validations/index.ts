@@ -40,7 +40,7 @@ export const registerSchema = z.object({
   full_name: z.string().min(2, "Name is required"),
   email: z.string().email("Valid email required"),
   password: z.string().min(8, "Password must be at least 8 characters"),
-  role: z.enum(["super_admin", "admin", "manager", "employee"]).optional(),
+  role: z.enum(["super_admin", "admin", "manager", "employee", "client"]).optional(),
 });
 
 export const companySchema = z.object({
@@ -102,6 +102,18 @@ export const commentSchema = z.object({
   content: z.string().min(1, "Comment cannot be empty"),
 });
 
+export const meetingSchema = z.object({
+  title: z.string().min(2, "Meeting title is required"),
+  agenda: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  scheduled_at: z.string().min(1, "Date & time required"),
+  duration_minutes: z.coerce.number().min(15).max(480).default(30),
+  location: z.string().optional().nullable(),
+  meeting_url: z.string().optional().nullable(),
+  manager_id: optionalUuid,
+  visible_to_client: z.boolean().optional().default(true),
+});
+
 export const profileUpdateSchema = z.object({
   full_name: z.string().min(2),
   phone: z.string().optional(),
@@ -111,7 +123,7 @@ export const profileUpdateSchema = z.object({
 export const userManageSchema = z.object({
   full_name: z.string().min(2),
   email: z.string().email(),
-  role: z.enum(["super_admin", "admin", "manager", "employee"]),
+  role: z.enum(["super_admin", "admin", "manager", "employee", "client"]),
   phone: z.string().optional(),
   is_active: z.boolean().optional(),
   password: z.string().min(8).optional(),
@@ -123,4 +135,5 @@ export type CompanyInput = z.infer<typeof companySchema>;
 export type ClientInput = z.infer<typeof clientSchema>;
 export type ProjectInput = z.infer<typeof projectSchema>;
 export type TaskInput = z.infer<typeof taskSchema>;
+export type MeetingInput = z.infer<typeof meetingSchema>;
 export type UserManageInput = z.infer<typeof userManageSchema>;

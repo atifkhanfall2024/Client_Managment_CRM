@@ -19,7 +19,9 @@ export type Permission =
   | "reports.view"
   | "settings.manage"
   | "documents.upload"
-  | "activity.view";
+  | "documents.view"
+  | "activity.view"
+  | "portal.view";
 
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   super_admin: [
@@ -40,6 +42,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "reports.view",
     "settings.manage",
     "documents.upload",
+    "documents.view",
     "activity.view",
   ],
   admin: [
@@ -58,6 +61,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "tasks.view",
     "reports.view",
     "documents.upload",
+    "documents.view",
     "activity.view",
   ],
   manager: [
@@ -72,6 +76,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "tasks.view",
     "reports.view",
     "documents.upload",
+    "documents.view",
     "activity.view",
   ],
   employee: [
@@ -80,7 +85,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "tasks.update",
     "tasks.view",
     "documents.upload",
+    "documents.view",
   ],
+  client: ["portal.view", "projects.view", "tasks.view", "documents.view"],
 };
 
 export function hasPermission(role: UserRole, permission: Permission) {
@@ -91,7 +98,19 @@ export function hasMinRole(role: UserRole, minRole: UserRole) {
   return ROLE_HIERARCHY[role] >= ROLE_HIERARCHY[minRole];
 }
 
+export function isStaffRole(role: UserRole) {
+  return role !== "client";
+}
+
+export function homePathForRole(role: UserRole) {
+  return role === "client" ? "/portal" : "/dashboard";
+}
+
 export function canAccessRoute(role: UserRole, path: string) {
+  if (role === "client") {
+    return path.startsWith("/portal") || path.startsWith("/api/files");
+  }
+  if (path.startsWith("/portal")) return false;
   if (path.startsWith("/users") || path.startsWith("/settings/roles")) {
     return hasPermission(role, "users.manage");
   }

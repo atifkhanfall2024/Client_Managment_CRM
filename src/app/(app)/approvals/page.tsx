@@ -25,12 +25,12 @@ export default async function ApprovalsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Team approvals</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Approvals</h1>
         <p className="text-muted">
           {profile.role === "super_admin"
-            ? `Approve Admins, Managers, and Employees before they can access ${APP_NAME}.`
+            ? `Approve Admins, Managers, Employees, and Client portal logins before they access ${APP_NAME}.`
             : profile.role === "admin"
-              ? "Approve Managers and Employees under your control."
+              ? "Approve Managers, Employees, and Client portal logins under your control."
               : "Approve Employees reporting into your team."}
         </p>
         <p className="mt-1 text-xs text-muted">
@@ -54,8 +54,9 @@ export default async function ApprovalsPage() {
               <p className="font-medium text-foreground">No pending registrations</p>
               <p>
                 Open an incognito window →{" "}
-                <span className="font-medium text-brand">/register</span> → create
-                an Admin / Manager / Employee account. Then refresh this page.
+                <span className="font-medium text-brand">/register</span> for
+                staff, or enable a Client portal on a client record. Then refresh
+                this page.
               </p>
               {profile.role === "super_admin" && (
                 <p className="text-xs">

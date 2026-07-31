@@ -41,12 +41,11 @@ export async function loginAction(
     if (result.approval_status !== "approved") {
       redirect("/pending");
     }
+    redirect(result.role === "client" ? "/portal" : "/dashboard");
   } catch (error) {
     if (isRedirectError(error)) throw error;
     return fromAppError(error);
   }
-
-  redirect("/dashboard");
 }
 
 export async function registerAction(
@@ -60,10 +59,10 @@ export async function registerAction(
     });
 
     const role = (formData.get("role") || "employee") as UserRole;
-    if (role === "super_admin") {
+    if (role === "super_admin" || role === "client") {
       return {
         success: false,
-        error: "Super Admin cannot be self-registered",
+        error: "This role cannot be self-registered",
         code: "FORBIDDEN",
       };
     }

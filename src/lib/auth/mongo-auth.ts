@@ -114,8 +114,8 @@ export async function registerWithMongo(input: {
   }
 
   const role = input.role ?? "employee";
-  if (role === "super_admin") {
-    throw new Error("You cannot register as Super Admin");
+  if (role === "super_admin" || role === "client") {
+    throw new Error("You cannot register with this role");
   }
 
   const existing = await UserModel.findOne({ email }).lean();
@@ -204,6 +204,7 @@ export async function loginWithMongo(input: {
   return {
     id: String(user.id),
     email: user.email,
+    role: user.role as UserRole,
     approval_status: (user.approval_status as ApprovalStatus) ?? "pending",
   };
 }

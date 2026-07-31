@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getClient, updateClientAction } from "@/actions/clients";
 import { getAllCompanies } from "@/actions/companies";
 import { getManagersAndEmployees } from "@/actions/users";
+import { getPortalUserStatus } from "@/actions/portal";
 import { requireProfile } from "@/lib/auth";
 import { hasPermission } from "@/lib/rbac";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -11,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PriorityBadge, StatusBadge } from "@/components/shared/status-badges";
 import { DocumentUploader } from "@/components/features/document-uploader";
+import { ClientPortalAccessForm } from "@/components/features/client-portal-access-form";
 
 export async function generateMetadata({
   params,
@@ -41,9 +43,10 @@ export default async function ClientDetailPage({
     notFound();
   }
 
-  const [companies, users] = await Promise.all([
+  const [companies, users, portalStatus] = await Promise.all([
     getAllCompanies(),
     getManagersAndEmployees(),
+    getPortalUserStatus(id),
   ]);
   const managers = users.filter((u) =>
     ["manager", "admin", "super_admin"].includes(u.role)
@@ -103,6 +106,17 @@ export default async function ClientDetailPage({
             </p>
           </CardContent>
         </Card>
+      )}
+
+      {canEdit && (
+        <ClientPortalAccessForm
+          clientId={id}
+          defaultEmail={client.email as string | null}
+          defaultName={client.name as string}
+          hasPortal={portalStatus.linked || Boolean(client.portal_user_id)}
+          portalApprovalStatus={portalStatus.approval_status}
+          portalEmail={portalStatus.email}
+        />
       )}
 
       <DocumentUploader entityType="client" entityId={id} />

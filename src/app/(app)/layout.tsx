@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { requireProfile } from "@/lib/auth";
 import { getUnreadCount } from "@/actions/dashboard";
 import { Sidebar } from "@/components/layout/sidebar";
@@ -9,6 +10,10 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const profile = await requireProfile();
+  if (profile.role === "client") {
+    redirect("/portal");
+  }
+
   let unreadCount = 0;
   try {
     unreadCount = await getUnreadCount();

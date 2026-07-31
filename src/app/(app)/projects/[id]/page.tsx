@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getProject, updateProjectAction } from "@/actions/projects";
+import { getProjectMeetings } from "@/actions/meetings";
 import { getClientOptions } from "@/actions/options";
 import { getManagersAndEmployees } from "@/actions/users";
 import { requireProfile } from "@/lib/auth";
 import { hasPermission } from "@/lib/rbac";
 import { ProjectForm } from "@/components/features/project-form";
+import { ProjectMeetingsPanel } from "@/components/features/project-meetings-panel";
 import { DocumentUploader } from "@/components/features/document-uploader";
 import { Button } from "@/components/ui/button";
 import { PriorityBadge, StatusBadge } from "@/components/shared/status-badges";
@@ -25,9 +27,10 @@ export default async function ProjectDetailPage({
     notFound();
   }
 
-  const [clients, users] = await Promise.all([
+  const [clients, users, meetings] = await Promise.all([
     getClientOptions(),
     getManagersAndEmployees(),
+    getProjectMeetings(id),
   ]);
 
   const managers = users.filter((u) =>
@@ -36,6 +39,7 @@ export default async function ProjectDetailPage({
   const employees = users.filter(
     (u) => u.role === "employee" || u.role === "manager"
   );
+  const canUpdate = hasPermission(profile.role, "projects.update");
 
   return (
     <div className="space-y-6">
@@ -48,9 +52,13 @@ export default async function ProjectDetailPage({
           <StatusBadge value={project.status} />
           <PriorityBadge value={project.priority} />
         </div>
+        <p className="mt-2 text-sm text-muted">
+          Progress update + client meetings yahan manage karein — client portal
+          pe full progress dikhegi.
+        </p>
       </div>
 
-      {hasPermission(profile.role, "projects.update") ? (
+      {canUpdate ? (
         <ProjectForm
           action={updateProjectAction.bind(null, id)}
           clients={clients}
@@ -59,6 +67,14 @@ export default async function ProjectDetailPage({
           project={project}
         />
       ) : null}
+
+      <ProjectMeetingsPanel
+        projectId={id}
+        managers={managers.map((m) => ({ id: m.id, full_name: m.full_name }))}
+        defaultManagerId={project.manager_id}
+        meetings={meetings}
+        canManage={canUpdate}
+      />
 
       <DocumentUploader entityType="project" entityId={id} />
     </div>

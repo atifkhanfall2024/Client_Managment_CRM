@@ -7,6 +7,7 @@ import {
   ActivityLogModel,
   ClientModel,
   NotificationModel,
+  ProjectMeetingModel,
   ProjectModel,
   TaskModel,
   toIso,
@@ -235,6 +236,72 @@ export async function getDashboardStats() {
     .lean();
   const clientName = new Map(clients.map((c) => [c.id, c.name]));
 
+  // Last 6 months trend (clients + projects created)
+  const now = new Date();
+  const monthKeys: { key: string; label: string; start: Date; end: Date }[] =
+    [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+    monthKeys.push({
+      key: `${d.getFullYear()}-${d.getMonth()}`,
+      label: d.toLocaleString("en-US", { month: "short" }),
+      start: d,
+      end,
+    });
+  }
+
+  const [clientsCreated, projectsCreated, meetingsScheduled, allProjectsProgress] =
+    await Promise.all([
+      ClientModel.find(notDeleted).select("created_at").lean(),
+      ProjectModel.find(notDeleted).select("created_at budget status progress").lean(),
+      ProjectMeetingModel.countDocuments({
+        ...notDeleted,
+        status: "scheduled",
+      }),
+      ProjectModel.find({
+        ...notDeleted,
+        status: { $in: [...ACTIVE_PROJECT_STATUSES] },
+      })
+        .select("id name progress")
+        .sort({ progress: -1 })
+        .limit(8)
+        .lean(),
+    ]);
+
+  const monthly_trend = monthKeys.map((m) => ({
+    name: m.label,
+    clients: clientsCreated.filter((c) => {
+      const t = new Date(c.created_at as Date).getTime();
+      return t >= m.start.getTime() && t < m.end.getTime();
+    }).length,
+    projects: projectsCreated.filter((p) => {
+      const t = new Date(p.created_at as Date).getTime();
+      return t >= m.start.getTime() && t < m.end.getTime();
+    }).length,
+  }));
+
+  const budget_mix = [
+    { name: "Pipeline", value: pipeline_value, key: "pipeline" },
+    { name: "Completed revenue", value: revenue, key: "revenue" },
+  ];
+
+  const progress_leaders = allProjectsProgress.map((p) => ({
+    name:
+      String(p.name).length > 16
+        ? `${String(p.name).slice(0, 14)}…`
+        : String(p.name),
+    value: Number(p.progress ?? 0),
+    key: String(p.id ?? p.name),
+  }));
+
+  const completion_rate =
+    total_tasks === 0 ? 0 : Math.round((done_tasks / total_tasks) * 100);
+  const project_completion_rate =
+    total_projects === 0
+      ? 0
+      : Math.round((completed_projects / total_projects) * 100);
+
   return {
     total_clients,
     active_clients,
@@ -250,6 +317,9 @@ export async function getDashboardStats() {
     employees: employeeCount,
     revenue,
     pipeline_value,
+    meetings_scheduled: meetingsScheduled,
+    completion_rate,
+    project_completion_rate,
     recent_activity,
     employee_performance: Array.from(perfMap.values()).sort(
       (a, b) => b.done / Math.max(b.total, 1) - a.done / Math.max(a.total, 1)
@@ -257,6 +327,9 @@ export async function getDashboardStats() {
     clients_by_status,
     projects_by_status,
     tasks_by_status,
+    monthly_trend,
+    budget_mix,
+    progress_leaders,
     recent_projects: recentProjects.map((p) => ({
       id: String(p.id),
       name: String(p.name),

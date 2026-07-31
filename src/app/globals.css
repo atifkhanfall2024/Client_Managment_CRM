@@ -69,6 +69,53 @@ body {
   }
 }
 
+@keyframes auth-video-drift {
+  0% {
+    transform: scale(1.1) translate3d(0, 0, 0);
+  }
+  100% {
+    transform: scale(1.16) translate3d(-1.5%, -1%, 0);
+  }
+}
+
+@keyframes auth-brand-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.03);
+    opacity: 1;
+  }
+}
+
+@keyframes auth-chip-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(12px, -18px, 0);
+  }
+}
+
+.auth-brand-grid {
+  background-image:
+    linear-gradient(rgba(212, 222, 234, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(212, 222, 234, 0.08) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+}
+
+.auth-brand-pulse {
+  animation: auth-brand-pulse 8s ease-in-out infinite;
+}
+
+.auth-brand-chip {
+  animation: auth-chip-float 12s ease-in-out infinite;
+}
+
 @keyframes shimmer {
   0% {
     background-position: 0% 50%;

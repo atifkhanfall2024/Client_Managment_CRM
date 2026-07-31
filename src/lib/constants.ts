@@ -23,9 +23,10 @@ export const ROLES: { value: UserRole; label: string }[] = [
   { value: "admin", label: "Admin" },
   { value: "manager", label: "Manager" },
   { value: "employee", label: "Employee" },
+  { value: "client", label: "Client (Portal)" },
 ];
 
-/** Roles selectable on public registration (never Super Admin). */
+/** Roles selectable on public registration (never Super Admin / Client). */
 export const REGISTER_ROLES: { value: UserRole; label: string; hint: string }[] =
   [
     {
@@ -78,6 +79,7 @@ export const TASK_STATUSES: { value: TaskStatus; label: string }[] = [
 export const PAGE_SIZE = 10;
 
 export const ROLE_HIERARCHY: Record<UserRole, number> = {
+  client: 0,
   employee: 1,
   manager: 2,
   admin: 3,

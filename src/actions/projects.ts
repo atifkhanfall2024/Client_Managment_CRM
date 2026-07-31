@@ -63,6 +63,8 @@ export async function getProjects(params?: {
   sort?: string;
   order?: "asc" | "desc";
 }) {
+  const { requireStaffProfile } = await import("@/lib/auth/require-staff");
+  await requireStaffProfile();
   await connectMongo();
   const page = params?.page ?? 1;
   const filter: Record<string, unknown> = { deleted_at: null };
@@ -112,6 +114,8 @@ export async function getProject(id: string): Promise<{
   manager: { id: string; full_name: string } | null;
   members: { id: string; project_id: string; user_id: string; profile: { id: string; full_name: string; email: string } }[];
 }> {
+  const { requireStaffProfile } = await import("@/lib/auth/require-staff");
+  await requireStaffProfile();
   await connectMongo();
   const project = await ProjectModel.findOne({ id, deleted_at: null }).lean();
   if (!project) throw new Error("Project not found");

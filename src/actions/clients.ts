@@ -42,6 +42,7 @@ async function attachClientRelations(client: Record<string, unknown>) {
     priority: client.priority as Client["priority"],
     created_by: (client.created_by as string | null) ?? null,
     assigned_manager_id: (client.assigned_manager_id as string | null) ?? null,
+    portal_user_id: (client.portal_user_id as string | null) ?? null,
     created_at: toIso(client.created_at as Date) ?? new Date().toISOString(),
     updated_at: toIso(client.updated_at as Date) ?? new Date().toISOString(),
     deleted_at: toIso(client.deleted_at as Date | null),
@@ -63,6 +64,8 @@ export async function getClients(params?: {
   sort?: string;
   order?: "asc" | "desc";
 }) {
+  const { requireStaffProfile } = await import("@/lib/auth/require-staff");
+  await requireStaffProfile();
   await connectMongo();
   const page = params?.page ?? 1;
   const filter: Record<string, unknown> = { deleted_at: null };
@@ -100,6 +103,8 @@ export async function getClients(params?: {
 }
 
 export async function getClient(id: string): Promise<Record<string, unknown> & { name: string; status: Client["status"]; priority: Client["priority"]; created_at: string; budget: number | null; email: string | null; phone: string | null; website: string | null; industry: string | null; requirements: string | null; company_id: string | null; assigned_manager_id: string | null; deadline: string | null; address: string | null }> {
+  const { requireStaffProfile } = await import("@/lib/auth/require-staff");
+  await requireStaffProfile();
   await connectMongo();
   const client = await ClientModel.findOne({ id, deleted_at: null }).lean();
   if (!client) throw new Error("Client not found");

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { redirect } from "next/navigation";
 import { Clock3, ShieldCheck } from "lucide-react";
+import { homePathForRole } from "@/lib/rbac";
 
 export const metadata = { title: "Pending Approval" };
 
@@ -12,15 +13,17 @@ export default async function PendingPage() {
   const profile = await requireAnySessionProfile();
 
   if (profile.approval_status === "approved") {
-    redirect("/dashboard");
+    redirect(homePathForRole(profile.role));
   }
 
   if (profile.approval_status === "rejected") {
     redirect("/login?error=rejected");
   }
 
-  const who =
-    profile.role === "admin"
+  const isClient = profile.role === "client";
+  const who = isClient
+    ? "an Admin or Super Admin"
+    : profile.role === "admin"
       ? "Super Admin"
       : profile.role === "manager"
         ? "an Admin"
@@ -38,7 +41,9 @@ export default async function PendingPage() {
           <p className="text-sm text-slate-300">
             Welcome to <span className="font-semibold text-white">{APP_NAME}</span>,{" "}
             {profile.full_name}. Your{" "}
-            <span className="capitalize">{profile.role.replace("_", " ")}</span>{" "}
+            <span className="capitalize">
+              {isClient ? "client portal" : profile.role.replace("_", " ")}
+            </span>{" "}
             account is waiting for verification.
           </p>
         </CardHeader>
@@ -48,8 +53,9 @@ export default async function PendingPage() {
               <ShieldCheck className="h-4 w-4" /> Access policy
             </div>
             <p>
-              You cannot open the dashboard until {who} approves your account.
-              Managers and employees stay under Admin control after approval.
+              {isClient
+                ? `You cannot open your client dashboard until ${who} approves this portal login. After approval you will only see your own projects and files.`
+                : `You cannot open the dashboard until ${who} approves your account. Managers and employees stay under Admin control after approval.`}
             </p>
           </div>
           <form action={logoutAction}>

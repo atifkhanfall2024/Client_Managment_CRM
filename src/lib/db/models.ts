@@ -44,6 +44,8 @@ const clientSchema = new Schema(
     },
     created_by: { type: String, default: null },
     assigned_manager_id: { type: String, default: null, index: true },
+    /** Linked portal login user (role: client). */
+    portal_user_id: { type: String, default: null, index: true },
     deleted_at: { type: Date, default: null },
   },
   { timestamps }
@@ -138,13 +140,47 @@ const activityLogSchema = new Schema(
     action: { type: String, required: true },
     entity_type: {
       type: String,
-      enum: ["client", "company", "project", "task", "user", "document"],
+      enum: [
+        "client",
+        "company",
+        "project",
+        "task",
+        "user",
+        "document",
+        "meeting",
+      ],
       required: true,
     },
     entity_id: { type: String, default: null },
     metadata: { type: Schema.Types.Mixed, default: {} },
   },
   { timestamps: { createdAt: "created_at", updatedAt: false } }
+);
+
+const projectMeetingSchema = new Schema(
+  {
+    id: { type: String, required: true, unique: true, index: true },
+    project_id: { type: String, required: true, index: true },
+    client_id: { type: String, required: true, index: true },
+    title: { type: String, required: true },
+    agenda: { type: String, default: null },
+    notes: { type: String, default: null },
+    scheduled_at: { type: String, required: true, index: true },
+    duration_minutes: { type: Number, default: 30 },
+    location: { type: String, default: null },
+    meeting_url: { type: String, default: null },
+    status: {
+      type: String,
+      enum: ["scheduled", "completed", "cancelled"],
+      default: "scheduled",
+      index: true,
+    },
+    created_by: { type: String, default: null },
+    manager_id: { type: String, default: null, index: true },
+    visible_to_client: { type: Boolean, default: true },
+    deleted_at: { type: Date, default: null },
+  },
+  { timestamps }
 );
 
 const notificationSchema = new Schema(
@@ -173,6 +209,9 @@ export const DocumentModel =
   models.Document || model("Document", documentSchema, "documents");
 export const ActivityLogModel =
   models.ActivityLog || model("ActivityLog", activityLogSchema, "activity_logs");
+export const ProjectMeetingModel =
+  models.ProjectMeeting ||
+  model("ProjectMeeting", projectMeetingSchema, "project_meetings");
 export const NotificationModel =
   models.Notification ||
   model("Notification", notificationSchema, "notifications");

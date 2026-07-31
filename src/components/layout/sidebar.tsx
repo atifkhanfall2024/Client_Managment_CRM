@@ -17,6 +17,7 @@ import {
   Menu,
   X,
   UserCheck,
+  CalendarDays,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { APP_NAME } from "@/lib/constants";
@@ -44,6 +45,12 @@ const navItems: {
     href: "/projects",
     label: "Projects",
     icon: FolderKanban,
+    permission: "projects.view",
+  },
+  {
+    href: "/meetings",
+    label: "Meetings",
+    icon: CalendarDays,
     permission: "projects.view",
   },
   { href: "/tasks", label: "Tasks", icon: CheckSquare, permission: "tasks.view" },
