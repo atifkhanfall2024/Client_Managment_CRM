@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth/session";
 
+/** Staff CRM surfaces (clients must not access these). */
 const STAFF_PREFIXES = [
   "/dashboard",
   "/clients",
@@ -18,23 +19,36 @@ const STAFF_PREFIXES = [
   "/api/clients",
 ];
 
+/** Unauthenticated guests may visit only these. */
+const PUBLIC_EXACT = new Set(["/"]);
+const PUBLIC_PREFIXES = [
+  "/login",
+  "/register",
+  "/verify-email",
+  "/forgot-password",
+];
+
+function isPublicPath(path: string) {
+  if (PUBLIC_EXACT.has(path)) return true;
+  return PUBLIC_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
+}
+
+function isStaffPath(path: string) {
+  return STAFF_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
+}
+
 export async function updateSession(request: NextRequest) {
   const response = NextResponse.next({ request });
   const path = request.nextUrl.pathname;
 
-  const isAuthRoute =
-    path.startsWith("/login") ||
-    path.startsWith("/register") ||
-    path.startsWith("/auth");
-
   const isPendingRoute = path.startsWith("/pending");
   const isPortalRoute = path.startsWith("/portal");
+  const isApiRoute = path.startsWith("/api/");
+  const isStaffProtected = isStaffPath(path);
+  const isPublic = isPublicPath(path);
 
-  const isStaffProtected = STAFF_PREFIXES.some(
-    (p) => path === p || path.startsWith(`${p}/`)
-  );
-  const isProtected =
-    isStaffProtected || isPortalRoute || path.startsWith("/api/files");
+  /** Deny by default: every non-public route requires a valid session. */
+  const needsAuth = !isPublic;
 
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   let user: Awaited<ReturnType<typeof verifySessionToken>> = null;
@@ -47,8 +61,8 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
-  if (!user && (isProtected || isPendingRoute)) {
-    if (path.startsWith("/api/")) {
+  if (!user && needsAuth) {
+    if (isApiRoute) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const url = request.nextUrl.clone();
@@ -57,20 +71,26 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user && isAuthRoute) {
+  // Authed users should not use guest auth pages
+  if (
+    user &&
+    (path.startsWith("/login") ||
+      path.startsWith("/register") ||
+      path.startsWith("/forgot-password") ||
+      path.startsWith("/verify-email"))
+  ) {
     const url = request.nextUrl.clone();
     url.pathname = user.role === "client" ? "/portal" : "/dashboard";
     return NextResponse.redirect(url);
   }
 
-  // Client users stay in portal only
-  if (user?.role === "client" && isStaffProtected) {
+  // Client ↔ staff isolation
+  if (user?.role === "client" && (isStaffProtected || isPendingRoute)) {
     const url = request.nextUrl.clone();
     url.pathname = "/portal";
     return NextResponse.redirect(url);
   }
 
-  // Staff cannot use portal routes
   if (user && user.role !== "client" && isPortalRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";

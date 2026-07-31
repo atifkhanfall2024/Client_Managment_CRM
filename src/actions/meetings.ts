@@ -14,6 +14,7 @@ import { UserModel } from "@/lib/auth/user-model";
 import { createNotification, logActivity } from "@/lib/activity";
 import { hasPermission } from "@/lib/rbac";
 import { meetingSchema } from "@/lib/validations";
+import { enforceRateLimit } from "@/core/security/enforce-rate-limit";
 import type { ActionResult } from "@/core/types/result";
 import type { MeetingStatus } from "@/types/database";
 
@@ -120,6 +121,19 @@ async function scheduleMeetingForProject(
   const profile = await requireStaffProfile();
   if (!hasPermission(profile.role, "projects.update")) {
     return { success: false, error: "Permission denied" };
+  }
+
+  try {
+    enforceRateLimit(`meetings:create:${profile.id}`, {
+      limit: 40,
+      windowMs: 60_000,
+    });
+  } catch {
+    return {
+      success: false,
+      error: "Too many meeting requests. Please wait a moment.",
+      code: "RATE_LIMITED",
+    };
   }
 
   const parsed = meetingSchema.safeParse({

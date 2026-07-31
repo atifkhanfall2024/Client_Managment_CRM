@@ -67,7 +67,12 @@ export async function getClients(params?: {
   const { requireStaffProfile } = await import("@/lib/auth/require-staff");
   await requireStaffProfile();
   await connectMongo();
-  const page = params?.page ?? 1;
+  const { safePageParams } = await import("@/lib/security/portal-scope");
+  const { page, skip } = safePageParams({
+    page: params?.page,
+    pageSize: PAGE_SIZE,
+    maxPageSize: PAGE_SIZE,
+  });
   const filter: Record<string, unknown> = { deleted_at: null };
 
   if (params?.search) {
@@ -85,7 +90,7 @@ export async function getClients(params?: {
   const count = await ClientModel.countDocuments(filter);
   const rows = await ClientModel.find(filter)
     .sort({ [sortField]: sortDir })
-    .skip((page - 1) * PAGE_SIZE)
+    .skip(skip)
     .limit(PAGE_SIZE)
     .lean();
 

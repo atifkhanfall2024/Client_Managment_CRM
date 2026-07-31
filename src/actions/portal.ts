@@ -322,16 +322,39 @@ export async function enableClientPortalAction(
   if (!client) return { success: false, error: "Client not found" };
 
   const existingUser = await UserModel.findOne({ email }).lean();
+  const currentPortalId = (client.portal_user_id as string | null) ?? null;
+
+  let otherClientUsingThisPortalUser = false;
+  if (existingUser) {
+    const linkedElsewhere = await ClientModel.findOne({
+      portal_user_id: existingUser.id,
+      id: { $ne: clientId },
+      ...notDeleted,
+    })
+      .select("id")
+      .lean();
+    otherClientUsingThisPortalUser = Boolean(linkedElsewhere);
+  }
+
+  const { canUseEmailForClientPortal } = await import(
+    "@/lib/security/portal-email"
+  );
+  const emailCheck = canUseEmailForClientPortal({
+    existingUser: existingUser
+      ? { id: String(existingUser.id), role: String(existingUser.role) }
+      : null,
+    currentClientPortalUserId: currentPortalId,
+    otherClientUsingThisPortalUser,
+  });
+  if (!emailCheck.ok) {
+    return { success: false, error: emailCheck.error };
+  }
+
   let userId: string;
   let needsApproval = true;
 
   if (existingUser) {
-    if (existingUser.role !== "client") {
-      return {
-        success: false,
-        error: "This email belongs to a staff account",
-      };
-    }
+    // Only reached when this is the same portal user for this client
     userId = String(existingUser.id);
     const alreadyApproved = existingUser.approval_status === "approved";
     needsApproval = !alreadyApproved;
@@ -341,8 +364,6 @@ export async function enableClientPortalAction(
         full_name: full_name || existingUser.full_name,
         passwordHash: await hash(password, 12),
         role: "client",
-        // Keep approved portal users approved when only rotating password;
-        // otherwise require admin verification again.
         approval_status: alreadyApproved ? "approved" : "pending",
         is_active: true,
         deleted_at: null,

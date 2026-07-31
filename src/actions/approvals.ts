@@ -83,6 +83,18 @@ export async function approveUserAction(userId: string): Promise<ActionResult> {
     link,
   });
 
+  // Best-effort email — approval must succeed even if SMTP fails
+  try {
+    const { sendAccountApprovedEmail } = await import("@/lib/mail");
+    await sendAccountApprovedEmail({
+      to: String(target.email),
+      fullName: String(target.full_name),
+      role: target.role as UserRole,
+    });
+  } catch (error) {
+    console.error("[approvals] approval email failed:", error);
+  }
+
   revalidatePath("/approvals");
   revalidatePath("/users");
   revalidatePath("/dashboard");
@@ -114,6 +126,17 @@ export async function rejectUserAction(userId: string): Promise<ActionResult> {
     title: "Account rejected",
     message: "Your registration was rejected. Contact your administrator.",
   });
+
+  try {
+    const { sendAccountRejectedEmail } = await import("@/lib/mail");
+    await sendAccountRejectedEmail({
+      to: String(target.email),
+      fullName: String(target.full_name),
+      role: target.role as UserRole,
+    });
+  } catch (error) {
+    console.error("[approvals] rejection email failed:", error);
+  }
 
   revalidatePath("/approvals");
   revalidatePath("/users");

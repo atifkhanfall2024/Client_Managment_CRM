@@ -63,8 +63,11 @@ export function ClientPortalAccessForm({
         <p className="mb-4 text-sm text-muted">
           Create a login for this client. They must be{" "}
           <span className="font-medium text-foreground">approved by Admin</span>{" "}
-          before they can open their private dashboard (projects, progress,
-          tasks, files).
+          before they can open their private dashboard.{" "}
+          <span className="font-medium text-foreground">
+            Jo email pehle se database me hai (staff ya koi aur account) woh
+            client portal ke liye use nahi ho sakti — naya unique email chahiye.
+          </span>
         </p>
         {hasPortal && portalEmail && (
           <p className="mb-4 rounded-lg border border-border bg-brand-soft/30 px-3 py-2 text-sm">

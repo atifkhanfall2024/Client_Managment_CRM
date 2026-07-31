@@ -66,6 +66,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   manager: [
     "clients.view",
+    "clients.update",
     "companies.manage",
     "projects.create",
     "projects.update",

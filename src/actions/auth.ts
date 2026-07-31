@@ -10,8 +10,15 @@ import { fromAppError } from "@/core/types/result";
 import {
   loginWithMongo,
   logoutMongo,
-  registerWithMongo,
-} from "@/lib/auth";
+  resendRegistrationOtp,
+  startRegistrationWithOtp,
+  verifyRegistrationOtp,
+} from "@/lib/auth/mongo-auth";
+import {
+  completePasswordReset,
+  requestPasswordResetOtp,
+  verifyPasswordResetOtp,
+} from "@/lib/auth/password-reset";
 import type { UserRole } from "@/types/database";
 
 export async function loginAction(
@@ -20,7 +27,7 @@ export async function loginAction(
 ): Promise<ActionResult> {
   try {
     enforceRateLimit(`auth:login:${String(formData.get("email") || "anon")}`, {
-      limit: 20,
+      limit: 15,
       windowMs: 60_000,
     });
 
@@ -54,7 +61,7 @@ export async function registerAction(
 ): Promise<ActionResult> {
   try {
     enforceRateLimit(`auth:register:${String(formData.get("email") || "anon")}`, {
-      limit: 10,
+      limit: 8,
       windowMs: 60_000,
     });
 
@@ -82,12 +89,39 @@ export async function registerAction(
       };
     }
 
-    await registerWithMongo({
+    await startRegistrationWithOtp({
       email: parsed.data.email,
       password: parsed.data.password,
       full_name: parsed.data.full_name,
       role: parsed.data.role as UserRole,
       reports_to: (formData.get("reports_to") as string) || null,
+    });
+
+    redirect(
+      `/verify-email?email=${encodeURIComponent(parsed.data.email.toLowerCase().trim())}`
+    );
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return fromAppError(error);
+  }
+}
+
+export async function verifyEmailOtpAction(
+  _prev: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
+  try {
+    const email = String(formData.get("email") || "")
+      .toLowerCase()
+      .trim();
+    enforceRateLimit(`auth:verify-otp:${email || "anon"}`, {
+      limit: 20,
+      windowMs: 60_000,
+    });
+
+    await verifyRegistrationOtp({
+      email,
+      otp: String(formData.get("otp") || ""),
     });
   } catch (error) {
     if (isRedirectError(error)) throw error;
@@ -95,6 +129,103 @@ export async function registerAction(
   }
 
   redirect("/pending");
+}
+
+export async function resendEmailOtpAction(
+  _prev: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
+  try {
+    const email = String(formData.get("email") || "")
+      .toLowerCase()
+      .trim();
+    enforceRateLimit(`auth:resend-otp:${email || "anon"}`, {
+      limit: 5,
+      windowMs: 10 * 60_000,
+    });
+    await resendRegistrationOtp(email);
+    return {
+      success: true,
+      data: { message: "A new verification code was sent to your email." },
+    };
+  } catch (error) {
+    return fromAppError(error);
+  }
+}
+
+export async function forgotPasswordRequestAction(
+  _prev: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
+  try {
+    const email = String(formData.get("email") || "")
+      .toLowerCase()
+      .trim();
+    enforceRateLimit(`auth:forgot:${email || "anon"}`, {
+      limit: 5,
+      windowMs: 10 * 60_000,
+    });
+    if (!email.includes("@")) {
+      return { success: false, error: "Valid email required", code: "VALIDATION" };
+    }
+    await requestPasswordResetOtp(email);
+    redirect(`/forgot-password/verify?email=${encodeURIComponent(email)}`);
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return fromAppError(error);
+  }
+}
+
+export async function forgotPasswordVerifyAction(
+  _prev: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
+  try {
+    const email = String(formData.get("email") || "")
+      .toLowerCase()
+      .trim();
+    enforceRateLimit(`auth:forgot-verify:${email || "anon"}`, {
+      limit: 20,
+      windowMs: 60_000,
+    });
+    await verifyPasswordResetOtp({
+      email,
+      otp: String(formData.get("otp") || ""),
+    });
+    redirect(`/forgot-password/reset?email=${encodeURIComponent(email)}`);
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return fromAppError(error);
+  }
+}
+
+export async function forgotPasswordResetAction(
+  _prev: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
+  try {
+    const email = String(formData.get("email") || "")
+      .toLowerCase()
+      .trim();
+    const password = String(formData.get("password") || "");
+    const confirm = String(formData.get("confirm_password") || "");
+    enforceRateLimit(`auth:forgot-reset:${email || "anon"}`, {
+      limit: 10,
+      windowMs: 60_000,
+    });
+    if (password !== confirm) {
+      return {
+        success: false,
+        error: "Passwords do not match",
+        code: "VALIDATION",
+      };
+    }
+    await completePasswordReset({ email, password });
+    redirect("/login?reset=1");
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return fromAppError(error);
+  }
 }
 
 export async function logoutAction() {

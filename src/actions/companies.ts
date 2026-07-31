@@ -14,6 +14,8 @@ export async function getCompanies(params?: {
   page?: number;
   search?: string;
 }) {
+  const { requireStaffProfile } = await import("@/lib/auth/require-staff");
+  await requireStaffProfile();
   await connectMongo();
   const page = params?.page ?? 1;
   const filter: Record<string, unknown> = { deleted_at: null };
@@ -47,6 +49,8 @@ export async function getCompanies(params?: {
 }
 
 export async function getAllCompanies() {
+  const { requireStaffProfile } = await import("@/lib/auth/require-staff");
+  await requireStaffProfile();
   await connectMongo();
   const rows = await CompanyModel.find({ deleted_at: null })
     .sort({ name: 1 })

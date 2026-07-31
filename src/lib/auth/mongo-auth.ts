@@ -1,4 +1,5 @@
 import { hash, compare } from "bcryptjs";
+import { randomInt, randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { connectMongo } from "@/lib/mongodb";
 import { UserModel } from "@/lib/auth/user-model";
@@ -9,7 +10,7 @@ import {
   setSessionCookie,
   signSession,
 } from "@/lib/auth/session";
-import { SUPER_ADMIN_EMAIL } from "@/lib/constants";
+import { isSuperAdminEmail } from "@/lib/constants";
 import type { ApprovalStatus, Profile, UserRole } from "@/types/database";
 
 function toProfile(user: {
@@ -97,7 +98,18 @@ export async function requireAnySessionProfile() {
   return profile;
 }
 
-export async function registerWithMongo(input: {
+function generateOtp() {
+  return String(randomInt(100000, 1000000));
+}
+
+async function hashOtp(otp: string) {
+  return hash(otp, 10);
+}
+
+/**
+ * Step 1: stash signup + email OTP. User document is NOT created yet.
+ */
+export async function startRegistrationWithOtp(input: {
   email: string;
   password: string;
   full_name: string;
@@ -106,10 +118,13 @@ export async function registerWithMongo(input: {
 }) {
   await ensureSuperAdmin();
   await connectMongo();
+  const { PendingRegistrationModel } = await import(
+    "@/lib/auth/pending-registration-model"
+  );
 
   const email = input.email.toLowerCase().trim();
 
-  if (email === SUPER_ADMIN_EMAIL.toLowerCase()) {
+  if (isSuperAdminEmail(email)) {
     throw new Error("This email is reserved for the Super Admin account");
   }
 
@@ -117,49 +132,207 @@ export async function registerWithMongo(input: {
   if (role === "super_admin" || role === "client") {
     throw new Error("You cannot register with this role");
   }
+  if (!["admin", "manager", "employee"].includes(role)) {
+    throw new Error("Invalid registration role");
+  }
 
   const existing = await UserModel.findOne({ email }).lean();
   if (existing) {
     throw new Error("An account with this email already exists");
   }
 
-  const id = crypto.randomUUID();
+  const otp = generateOtp();
+  const otpHash = await hashOtp(otp);
   const passwordHash = await hash(input.password, 12);
+  const id = randomUUID();
+  const otp_expires_at = new Date(Date.now() + 10 * 60 * 1000);
+
+  await PendingRegistrationModel.findOneAndUpdate(
+    { email },
+    {
+      id,
+      email,
+      passwordHash,
+      full_name: input.full_name,
+      role,
+      reports_to: input.reports_to ?? null,
+      otpHash,
+      otp_expires_at,
+      otp_attempts: 0,
+      resend_count: 0,
+      last_otp_sent_at: new Date(),
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  const { sendRegistrationOtpEmail } = await import("@/lib/mail");
+  const mail = await sendRegistrationOtpEmail({
+    to: email,
+    fullName: input.full_name,
+    otp,
+  });
+  if (!mail.sent) {
+    if (mail.reason === "not_configured") {
+      throw new Error(
+        "Email not configured. Add EMAIL and EMAIL_PASSWORD (Gmail App Password) to .env.local then restart the server."
+      );
+    }
+    throw new Error(
+      "Could not send verification email. Check EMAIL / EMAIL_PASSWORD and restart npm run dev."
+    );
+  }
+
+  return { email, expiresInMinutes: 10 };
+}
+
+/**
+ * Step 2: verify OTP → create User in DB (pending admin approval) → session.
+ */
+export async function verifyRegistrationOtp(input: {
+  email: string;
+  otp: string;
+}) {
+  await ensureSuperAdmin();
+  await connectMongo();
+  const { PendingRegistrationModel } = await import(
+    "@/lib/auth/pending-registration-model"
+  );
+
+  const email = input.email.toLowerCase().trim();
+  const otp = String(input.otp || "").trim();
+
+  if (!/^\d{6}$/.test(otp)) {
+    throw new Error("Enter the 6-digit verification code");
+  }
+
+  const pending = await PendingRegistrationModel.findOne({ email }).lean();
+  if (!pending) {
+    throw new Error("No pending verification found. Please register again.");
+  }
+
+  if (Number(pending.otp_attempts ?? 0) >= 5) {
+    await PendingRegistrationModel.deleteOne({ email });
+    throw new Error("Too many invalid attempts. Please register again.");
+  }
+
+  if (new Date(pending.otp_expires_at as Date).getTime() < Date.now()) {
+    throw new Error("Verification code expired. Request a new code.");
+  }
+
+  const valid = await compare(otp, String(pending.otpHash));
+  if (!valid) {
+    await PendingRegistrationModel.updateOne(
+      { email },
+      { $inc: { otp_attempts: 1 } }
+    );
+    throw new Error("Invalid verification code");
+  }
+
+  const existing = await UserModel.findOne({ email }).lean();
+  if (existing) {
+    await PendingRegistrationModel.deleteOne({ email });
+    throw new Error("An account with this email already exists");
+  }
+
+  const id = randomUUID();
+  const role = pending.role as UserRole;
 
   await UserModel.create({
     id,
     email,
-    passwordHash,
-    full_name: input.full_name,
+    passwordHash: pending.passwordHash,
+    full_name: pending.full_name,
     role,
     is_active: true,
     approval_status: "pending",
-    reports_to: input.reports_to ?? null,
+    reports_to: pending.reports_to ?? null,
   });
+
+  await PendingRegistrationModel.deleteOne({ email });
 
   try {
     const { notifyApproversOfRegistration } = await import(
       "@/actions/approvals"
     );
     await notifyApproversOfRegistration({
-      full_name: input.full_name,
+      full_name: String(pending.full_name),
       email,
       role,
       userId: id,
     });
   } catch {
-    // Registration should still succeed if notification fails
+    // continue
   }
 
   const token = await signSession({
     sub: id,
     email,
-    full_name: input.full_name,
+    full_name: String(pending.full_name),
     role,
   });
   await setSessionCookie(token);
 
   return { id, email, role, approval_status: "pending" as const };
+}
+
+export async function resendRegistrationOtp(emailRaw: string) {
+  await connectMongo();
+  const { PendingRegistrationModel } = await import(
+    "@/lib/auth/pending-registration-model"
+  );
+
+  const email = emailRaw.toLowerCase().trim();
+  const pending = await PendingRegistrationModel.findOne({ email }).lean();
+  if (!pending) {
+    throw new Error("No pending verification found. Please register again.");
+  }
+
+  const lastSent = pending.last_otp_sent_at
+    ? new Date(pending.last_otp_sent_at as Date).getTime()
+    : 0;
+  if (Date.now() - lastSent < 60_000) {
+    throw new Error("Please wait 60 seconds before requesting another code.");
+  }
+  if (Number(pending.resend_count ?? 0) >= 5) {
+    throw new Error("Resend limit reached. Please register again later.");
+  }
+
+  const otp = generateOtp();
+  await PendingRegistrationModel.updateOne(
+    { email },
+    {
+      $set: {
+        otpHash: await hashOtp(otp),
+        otp_expires_at: new Date(Date.now() + 10 * 60 * 1000),
+        otp_attempts: 0,
+        last_otp_sent_at: new Date(),
+      },
+      $inc: { resend_count: 1 },
+    }
+  );
+
+  const { sendRegistrationOtpEmail } = await import("@/lib/mail");
+  const mail = await sendRegistrationOtpEmail({
+    to: email,
+    fullName: String(pending.full_name),
+    otp,
+  });
+  if (!mail.sent) {
+    throw new Error("Could not send verification email. Try again shortly.");
+  }
+
+  return { email, expiresInMinutes: 10 };
+}
+
+/** @deprecated Prefer startRegistrationWithOtp + verifyRegistrationOtp */
+export async function registerWithMongo(input: {
+  email: string;
+  password: string;
+  full_name: string;
+  role?: UserRole;
+  reports_to?: string | null;
+}) {
+  return startRegistrationWithOtp(input);
 }
 
 export async function loginWithMongo(input: {
@@ -169,8 +342,23 @@ export async function loginWithMongo(input: {
   await ensureSuperAdmin();
   await connectMongo();
 
+  const email = input.email.toLowerCase().trim();
+
+  // Block login while email OTP is still pending (no User yet)
+  const { PendingRegistrationModel } = await import(
+    "@/lib/auth/pending-registration-model"
+  );
+  const pending = await PendingRegistrationModel.findOne({ email })
+    .select("email")
+    .lean();
+  if (pending) {
+    throw new Error(
+      "Please verify your email with the OTP code before signing in."
+    );
+  }
+
   const user = await UserModel.findOne({
-    email: input.email.toLowerCase().trim(),
+    email,
     deleted_at: null,
   })
     .select("+passwordHash")

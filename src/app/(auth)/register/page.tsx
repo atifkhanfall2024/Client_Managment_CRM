@@ -5,7 +5,7 @@ import { AuthShell } from "@/components/auth/auth-shell";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { APP_NAME, REGISTER_ROLES } from "@/lib/constants";
+import { REGISTER_ROLES } from "@/lib/constants";
 
 export const metadata = { title: "Create account" };
 
@@ -15,8 +15,8 @@ export default function RegisterPage() {
       <AuthForm
         action={registerAction}
         title="Join the workspace"
-        subtitle={`${APP_NAME} accounts require approval before dashboard access`}
-        submitLabel="Create account"
+        subtitle={`Enter your details — we will email a 6-digit code. Your account is saved only after email verification, then admin approval.`}
+        submitLabel="Send verification code"
         footer={
           <p className="text-muted">
             Already have an account?{" "}

@@ -14,6 +14,7 @@ import {
   canAccessDocument,
   sanitizeRelativeUploadPath,
 } from "@/lib/security/file-access";
+import { rateLimit } from "@/core/security/rate-limit";
 
 const notDeleted = {
   $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }],
@@ -26,6 +27,20 @@ export async function GET(
   const profile = await getCurrentProfile();
   if (!profile) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const limited = rateLimit(`api:files:${profile.id}`, {
+    limit: 120,
+    windowMs: 60_000,
+  });
+  if (!limited.allowed) {
+    return NextResponse.json(
+      { error: "Too many file requests. Try again shortly." },
+      {
+        status: 429,
+        headers: { "Retry-After": "60" },
+      }
+    );
   }
 
   const { path: parts } = await context.params;

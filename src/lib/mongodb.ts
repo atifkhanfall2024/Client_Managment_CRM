@@ -29,21 +29,35 @@ function getMongoUri() {
   return uri;
 }
 
+/**
+ * Shared Mongo connection with pool settings for concurrent users.
+ * Reuses one connection promise across the Node process.
+ */
 export async function connectMongo() {
   const uri = getMongoUri();
 
-  // If URI changed (e.g. switched from local to Atlas), drop old cache
   if (cached.uri && cached.uri !== uri) {
     cached.conn = null;
     cached.promise = null;
   }
 
-  if (cached.conn) return cached.conn;
+  if (cached.conn) {
+    if (cached.conn.connection.readyState === 1) return cached.conn;
+    cached.conn = null;
+    cached.promise = null;
+  }
 
   if (!cached.promise) {
     cached.uri = uri;
     cached.promise = mongoose
-      .connect(uri, { bufferCommands: false })
+      .connect(uri, {
+        bufferCommands: false,
+        maxPoolSize: Number(process.env.MONGO_MAX_POOL ?? 50),
+        minPoolSize: Number(process.env.MONGO_MIN_POOL ?? 2),
+        maxIdleTimeMS: 30_000,
+        serverSelectionTimeoutMS: 8_000,
+        socketTimeoutMS: 45_000,
+      })
       .then((m) => m)
       .catch((err) => {
         cached.promise = null;

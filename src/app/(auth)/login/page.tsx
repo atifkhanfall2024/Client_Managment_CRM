@@ -28,12 +28,18 @@ async function LoginInner({
       : params.error === "inactive"
         ? "Your account is inactive."
         : null;
+  const resetOk = params.reset === "1";
 
   return (
     <AuthShell>
       {errorHint && (
         <p className="mb-4 rounded-xl border border-amber-200/80 bg-amber-50/90 px-4 py-3 text-sm text-amber-800 backdrop-blur dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200">
           {errorHint}
+        </p>
+      )}
+      {resetOk && (
+        <p className="mb-4 rounded-xl border border-emerald-200/80 bg-emerald-50/90 px-4 py-3 text-sm text-emerald-800 backdrop-blur dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200">
+          Password updated successfully. Sign in with your new password.
         </p>
       )}
       <AuthForm
@@ -65,7 +71,15 @@ async function LoginInner({
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="password">Password</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="password">Password</Label>
+            <Link
+              href="/forgot-password"
+              className="text-xs font-semibold text-brand hover:underline"
+            >
+              Forgot password?
+            </Link>
+          </div>
           <Input
             id="password"
             name="password"

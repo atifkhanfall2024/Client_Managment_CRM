@@ -13,10 +13,27 @@ export const COMPANY_NAME = "Wrapify Solutions";
 export const COMPANY_URL = "https://www.wrapifysolutions.com";
 export const APP_BYLINE = `A product of ${COMPANY_NAME}`;
 
-/** Only this account is Super Admin (seeded automatically). */
-export const SUPER_ADMIN_EMAIL = "muhammadatifkhan0906@gmail.com";
+/** Seeded Super Admin accounts (created/refreshed on auth bootstrap). */
 export const SUPER_ADMIN_PASSWORD = "Atifkhan@1";
-export const SUPER_ADMIN_NAME = "Muhammad Atif Khan";
+export const SUPER_ADMIN_ACCOUNTS = [
+  {
+    email: "muhammadatifkhan0906@gmail.com",
+    full_name: "Muhammad Atif Khan",
+  },
+  {
+    email: "wrapifysolutions@gmail.com",
+    full_name: "Wrapify Solutions",
+  },
+] as const;
+
+/** @deprecated Prefer SUPER_ADMIN_ACCOUNTS — kept for single-email checks. */
+export const SUPER_ADMIN_EMAIL = SUPER_ADMIN_ACCOUNTS[0].email;
+export const SUPER_ADMIN_NAME = SUPER_ADMIN_ACCOUNTS[0].full_name;
+
+export function isSuperAdminEmail(email: string) {
+  const normalized = email.toLowerCase().trim();
+  return SUPER_ADMIN_ACCOUNTS.some((a) => a.email.toLowerCase() === normalized);
+}
 
 export const ROLES: { value: UserRole; label: string }[] = [
   { value: "super_admin", label: "Super Admin" },
