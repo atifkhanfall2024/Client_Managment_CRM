@@ -9,11 +9,11 @@ const LIGHT_VIDEO =
 const LIGHT_POSTER =
   "https://images.pexels.com/videos/4463352/free-video-4463352.jpg?auto=compress&cs=tinysrgb&w=1920";
 
-/** Deeper office atmosphere for dark mode */
+/** Deeper office atmosphere for dark mode (1080p, not UHD) */
 const DARK_VIDEO =
-  "https://videos.pexels.com/video-files/3129957/3129957-uhd_2560_1440_25fps.mp4";
+  "https://videos.pexels.com/video-files/3129957/3129957-hd_1920_1080_25fps.mp4";
 const DARK_POSTER =
-  "https://images.pexels.com/videos/3129957/free-video-3129957.jpg?auto=compress&cs=tinysrgb&w=1920";
+  "https://images.pexels.com/videos/3129957/free-video-3129957.jpg?auto=compress&cs=tinysrgb&w=1280";
 
 export function HeroVideoBackground({
   variant = "landing",
@@ -45,12 +45,12 @@ export function HeroVideoBackground({
       <video
         key={src}
         ref={ref}
-        className="absolute inset-0 h-full w-full scale-110 object-cover motion-safe:animate-[auth-video-drift_28s_ease-in-out_infinite_alternate]"
+        className="absolute inset-0 h-full w-full scale-105 object-cover"
         autoPlay
         muted
         loop
         playsInline
-        preload="auto"
+        preload="metadata"
         poster={poster}
         aria-hidden
       >

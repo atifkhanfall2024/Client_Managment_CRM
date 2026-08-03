@@ -34,13 +34,16 @@ export function FormShell({
   const [state, formAction] = useActionState(action, null);
 
   useEffect(() => {
-    if (state?.success) {
+    if (!state) return;
+    if (state.success) {
       toast.success("Saved successfully");
       onSuccess?.();
-    } else if (state && !state.success) {
-      toast.error(state.error);
+    } else {
+      toast.error(state.error ?? "Save failed");
     }
-  }, [state, onSuccess]);
+    // Only react to new action results, not onSuccess identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   return (
     <form action={formAction} className={className ?? "space-y-4"}>

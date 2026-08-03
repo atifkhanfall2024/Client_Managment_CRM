@@ -16,6 +16,7 @@ export function ClientForm({
   companies,
   managers,
   client,
+  showBudget = true,
 }: {
   action: (
     prev: ActionResult | null,
@@ -39,6 +40,7 @@ export function ClientForm({
     priority?: Client["priority"];
     assigned_manager_id?: string | null;
   };
+  showBudget?: boolean;
 }) {
   const router = useRouter();
 
@@ -126,16 +128,20 @@ export function ClientForm({
               defaultValue={client?.address ?? ""}
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="budget">Budget</Label>
-            <Input
-              id="budget"
-              name="budget"
-              type="number"
-              min={0}
-              defaultValue={client?.budget ?? 0}
-            />
-          </div>
+          {showBudget ? (
+            <div className="space-y-2">
+              <Label htmlFor="budget">Budget</Label>
+              <Input
+                id="budget"
+                name="budget"
+                type="number"
+                min={0}
+                defaultValue={client?.budget ?? 0}
+              />
+            </div>
+          ) : (
+            <input type="hidden" name="budget" value={client?.budget ?? 0} />
+          )}
           <div className="space-y-2">
             <Label htmlFor="deadline">Deadline</Label>
             <Input

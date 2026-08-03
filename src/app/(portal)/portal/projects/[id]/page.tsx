@@ -3,11 +3,12 @@ import { notFound } from "next/navigation";
 import {
   ArrowLeft,
   CalendarDays,
-  FileText,
   ListTodo,
   UserRound,
 } from "lucide-react";
-import { getPortalProject } from "@/actions/portal";
+import { getPortalProject, getPortalProjects, getPortalMeetingManagers } from "@/actions/portal";
+import { DocumentUploader } from "@/components/features/document-uploader";
+import { PortalScheduleMeetingForm } from "@/components/features/portal-schedule-meeting-form";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,7 +29,11 @@ export default async function PortalProjectDetailPage({
     notFound();
   }
 
-  const { project, tasks, documents, meetings, manager, taskStats } = data;
+  const { project, tasks, meetings, manager, taskStats } = data;
+  const [projects, managers] = await Promise.all([
+    getPortalProjects(),
+    getPortalMeetingManagers(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -89,6 +94,13 @@ export default async function PortalProjectDetailPage({
           <CardContent className="text-2xl font-bold">
             {formatCurrency(project.budget)}
           </CardContent>
+          {data.client?.budget != null &&
+            Number(data.client.budget) > 0 &&
+            Number(project.budget) !== Number(data.client.budget) && (
+              <p className="px-6 pb-4 text-xs text-muted">
+                Account budget {formatCurrency(data.client.budget)}
+              </p>
+            )}
         </Card>
         <Card className="border-border">
           <CardHeader>
@@ -215,31 +227,18 @@ export default async function PortalProjectDetailPage({
         </Card>
       </div>
 
-      <Card className="border-border">
-        <CardHeader>
-          <CardTitle>Shared documents</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {documents.length === 0 && (
-            <p className="text-sm text-muted">No files shared yet.</p>
-          )}
-          {documents.map((doc) => (
-            <a
-              key={doc.id}
-              href={`/api/files/${doc.file_path}`}
-              className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2 transition hover:border-brand/40"
-            >
-              <span className="flex items-center gap-2 text-sm font-medium">
-                <FileText className="h-4 w-4 text-brand" />
-                {doc.file_name}
-              </span>
-              <span className="text-xs text-muted">
-                {formatDate(doc.created_at)}
-              </span>
-            </a>
-          ))}
-        </CardContent>
-      </Card>
+      <PortalScheduleMeetingForm
+        projects={projects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          manager_id: p.manager_id,
+        }))}
+        managers={managers}
+        defaultProjectId={project.id}
+        defaultManagerId={manager?.id ?? null}
+      />
+
+      <DocumentUploader entityType="project" entityId={project.id} />
     </div>
   );
 }

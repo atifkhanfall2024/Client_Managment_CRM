@@ -1,20 +1,27 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getMeetings } from "@/actions/meetings";
 import { getProjectOptions } from "@/actions/options";
 import { getManagersAndEmployees } from "@/actions/users";
 import { requireProfile } from "@/lib/auth";
+import { summarizeMeetingsByParty } from "@/lib/meetings/stats";
 import { formatDateTime } from "@/lib/utils";
 import { hasPermission } from "@/lib/rbac";
+import { MeetingCountSummary } from "@/components/features/meeting-count-summary";
 import { ScheduleMeetingForm } from "@/components/features/schedule-meeting-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import Link from "next/link";
 
 export const metadata = { title: "Meetings" };
 export const dynamic = "force-dynamic";
 
 export default async function MeetingsPage() {
   const profile = await requireProfile();
+  if (!hasPermission(profile.role, "clients.view")) {
+    redirect("/dashboard");
+  }
+
   if (!hasPermission(profile.role, "projects.view")) {
     return (
       <p className="text-sm text-muted">You do not have access to meetings.</p>
@@ -32,6 +39,7 @@ export default async function MeetingsPage() {
   );
   const upcoming = meetings.filter((m) => m.status === "scheduled");
   const past = meetings.filter((m) => m.status !== "scheduled");
+  const { byManager, byClient } = summarizeMeetingsByParty(meetings);
 
   return (
     <div className="space-y-6">
@@ -42,6 +50,8 @@ export default async function MeetingsPage() {
           karni padti hai. Client portal pe bhi yeh dikhegi.
         </p>
       </div>
+
+      <MeetingCountSummary byManager={byManager} byClient={byClient} />
 
       {canSchedule && (
         <ScheduleMeetingForm
@@ -94,6 +104,7 @@ export default async function MeetingsPage() {
                       min
                     </p>
                     <p className="mt-1 text-sm text-muted">
+                      {m.client?.name ? `${m.client.name} · ` : ""}
                       {m.project?.name ?? "Project"}
                       {m.manager ? ` · ${m.manager.full_name}` : ""}
                     </p>
@@ -109,12 +120,12 @@ export default async function MeetingsPage() {
 
         <Card className="border-border">
           <CardHeader>
-            <CardTitle className="text-base">Completed / cancelled</CardTitle>
+            <CardTitle className="text-base">Past meetings</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {past.length === 0 && (
               <p className="py-6 text-center text-sm text-muted">
-                Past meetings yahan dikhengi.
+                Completed, cancelled, or expired meetings yahan dikhengi.
               </p>
             )}
             {past.map((m) => (
@@ -133,7 +144,9 @@ export default async function MeetingsPage() {
                     )}
                   </div>
                   <Badge variant="secondary" className="capitalize">
-                    {m.status}
+                    {m.notes?.startsWith("Auto-closed")
+                      ? "expired"
+                      : m.status}
                   </Badge>
                 </div>
               </div>

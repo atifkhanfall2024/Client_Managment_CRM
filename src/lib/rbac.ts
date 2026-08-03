@@ -17,6 +17,7 @@ export type Permission =
   | "tasks.update"
   | "tasks.view"
   | "reports.view"
+  | "finance.view"
   | "settings.manage"
   | "documents.upload"
   | "documents.view"
@@ -40,6 +41,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "tasks.update",
     "tasks.view",
     "reports.view",
+    "finance.view",
     "settings.manage",
     "documents.upload",
     "documents.view",
@@ -60,6 +62,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "tasks.update",
     "tasks.view",
     "reports.view",
+    "finance.view",
     "documents.upload",
     "documents.view",
     "activity.view",
@@ -76,23 +79,84 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "tasks.update",
     "tasks.view",
     "reports.view",
+    "finance.view",
     "documents.upload",
     "documents.view",
     "activity.view",
   ],
   employee: [
-    "clients.view",
     "projects.view",
     "tasks.update",
     "tasks.view",
     "documents.upload",
     "documents.view",
   ],
-  client: ["portal.view", "projects.view", "tasks.view", "documents.view"],
+  client: [
+    "portal.view",
+    "projects.view",
+    "tasks.view",
+    "documents.view",
+    "documents.upload",
+  ],
 };
 
 export function hasPermission(role: UserRole, permission: Permission) {
   return ROLE_PERMISSIONS[role]?.includes(permission) ?? false;
+}
+
+/** Budget, pipeline, revenue — hidden from employees. */
+export function canViewFinance(role: UserRole) {
+  return hasPermission(role, "finance.view");
+}
+
+/** Client records & contact info — employees work via manager only. */
+export function canViewClients(role: UserRole) {
+  return hasPermission(role, "clients.view");
+}
+
+/** Strip payment/budget fields for roles without finance access. */
+export function redactBudget<T extends { budget?: unknown }>(
+  row: T,
+  role: UserRole
+): T {
+  if (canViewFinance(role)) return row;
+  return { ...row, budget: null };
+}
+
+export function redactBudgetList<T extends { budget?: unknown }>(
+  rows: T[],
+  role: UserRole
+): T[] {
+  if (canViewFinance(role)) return rows;
+  return rows.map((row) => ({ ...row, budget: null }));
+}
+
+/** Hide client identity from employees on project payloads. */
+export function redactClientInfo<
+  T extends {
+    client?: unknown;
+    client_id?: unknown;
+    client_name?: unknown;
+  },
+>(row: T, role: UserRole): T {
+  if (canViewClients(role)) return row;
+  return {
+    ...row,
+    client: null,
+    client_id: null,
+    client_name: "—",
+  };
+}
+
+export function redactClientInfoList<
+  T extends {
+    client?: unknown;
+    client_id?: unknown;
+    client_name?: unknown;
+  },
+>(rows: T[], role: UserRole): T[] {
+  if (canViewClients(role)) return rows;
+  return rows.map((row) => redactClientInfo(row, role));
 }
 
 export function hasMinRole(role: UserRole, minRole: UserRole) {
@@ -121,8 +185,15 @@ export function canAccessRoute(role: UserRole, path: string) {
   if (path.startsWith("/activity")) {
     return hasPermission(role, "activity.view");
   }
-  if (path.startsWith("/clients") && path.includes("/new")) {
-    return hasPermission(role, "clients.create");
+  if (path.startsWith("/clients") || path.startsWith("/api/clients")) {
+    return hasPermission(role, "clients.view");
+  }
+  if (path.startsWith("/companies")) {
+    return hasPermission(role, "companies.manage");
+  }
+  if (path.startsWith("/meetings") || path.startsWith("/feedback")) {
+    // Client meetings + feedback inbox — managers/admins, not employees
+    return hasPermission(role, "clients.view");
   }
   return true;
 }

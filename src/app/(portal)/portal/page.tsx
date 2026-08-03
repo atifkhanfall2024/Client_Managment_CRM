@@ -196,6 +196,9 @@ export default async function PortalHomePage() {
               {client.industry && (
                 <p className="text-xs text-muted">{client.industry}</p>
               )}
+              <p className="mt-2 text-sm font-medium text-foreground">
+                Budget {formatCurrency(client.budget)}
+              </p>
             </div>
             <div className="flex justify-between">
               <span className="text-muted">Tasks done</span>

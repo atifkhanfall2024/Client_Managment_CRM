@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import {
   cancelMeetingAction,
   completeMeetingWithNotesAction,
@@ -14,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { formatDateTime } from "@/lib/utils";
 
 type MeetingRow = {
   id: string;
@@ -29,6 +30,15 @@ type MeetingRow = {
   manager?: { full_name: string } | null;
 };
 
+function SubmitMeetingButton() {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" disabled={pending}>
+      {pending ? "Scheduling..." : "Schedule meeting"}
+    </Button>
+  );
+}
+
 export function ProjectMeetingsPanel({
   projectId,
   managers,
@@ -42,13 +52,10 @@ export function ProjectMeetingsPanel({
   meetings: MeetingRow[];
   canManage: boolean;
 }) {
-  const bound = createMeetingAction.bind(null, projectId);
   const [state, formAction] = useActionState(
-    bound as (
-      prev: ActionResult | null,
-      formData: FormData
-    ) => Promise<ActionResult>,
-    null
+    async (prev: ActionResult | null, formData: FormData) =>
+      createMeetingAction(projectId, prev, formData),
+    null as ActionResult | null
   );
 
   return (
@@ -146,7 +153,7 @@ export function ProjectMeetingsPanel({
                   Meeting scheduled. Client portal pe bhi dikhegi.
                 </p>
               )}
-              <Button type="submit">Schedule meeting</Button>
+              <SubmitMeetingButton />
             </form>
           </CardContent>
         </Card>
@@ -176,9 +183,9 @@ export function ProjectMeetingsPanel({
                     {m.manager ? ` · ${m.manager.full_name}` : ""}
                   </p>
                 </div>
-                <Badge variant="secondary" className="capitalize">
-                  {m.status}
-                </Badge>
+                  <Badge variant="secondary" className="capitalize">
+                    {m.notes?.startsWith("Auto-closed") ? "expired" : m.status}
+                  </Badge>
               </div>
               {m.agenda && (
                 <p className="mt-2 text-sm text-muted">{m.agenda}</p>

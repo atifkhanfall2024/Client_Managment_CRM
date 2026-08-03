@@ -196,6 +196,36 @@ const notificationSchema = new Schema(
   { timestamps: { createdAt: "created_at", updatedAt: false } }
 );
 
+const feedbackSchema = new Schema(
+  {
+    id: { type: String, required: true, unique: true, index: true },
+    client_id: { type: String, required: true, index: true },
+    submitted_by: { type: String, required: true, index: true },
+    type: {
+      type: String,
+      enum: ["feedback", "feature"],
+      required: true,
+      index: true,
+    },
+    title: { type: String, required: true },
+    message: { type: String, required: true },
+    status: {
+      type: String,
+      enum: ["new", "reviewed", "planned", "done", "dismissed"],
+      default: "new",
+      index: true,
+    },
+    /** Internal-only note (not shown to client). */
+    staff_notes: { type: String, default: null },
+    /** Reply message shown to the client. */
+    reply: { type: String, default: null },
+    seen_at: { type: Date, default: null },
+    seen_by: { type: String, default: null },
+    deleted_at: { type: Date, default: null },
+  },
+  { timestamps }
+);
+
 export const CompanyModel =
   models.Company || model("Company", companySchema, "companies");
 export const ClientModel =
@@ -215,6 +245,8 @@ export const ProjectMeetingModel =
 export const NotificationModel =
   models.Notification ||
   model("Notification", notificationSchema, "notifications");
+export const FeedbackModel =
+  models.Feedback || model("Feedback", feedbackSchema, "feedback");
 
 export function newId() {
   return crypto.randomUUID();

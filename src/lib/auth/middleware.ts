@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth/session";
+import { canAccessRoute } from "@/lib/rbac";
+import type { UserRole } from "@/types/database";
 
 /** Staff CRM surfaces (clients must not access these). */
 const STAFF_PREFIXES = [
@@ -15,6 +17,7 @@ const STAFF_PREFIXES = [
   "/documents",
   "/notifications",
   "/activity",
+  "/feedback",
   "/settings",
   "/api/clients",
 ];
@@ -40,17 +43,22 @@ function isStaffPath(path: string) {
 export async function updateSession(request: NextRequest) {
   const response = NextResponse.next({ request });
   const path = request.nextUrl.pathname;
+  const isPublic = isPublicPath(path);
+  const token = request.cookies.get(SESSION_COOKIE)?.value;
+
+  // Fast path: public pages with no session cookie skip JWT work
+  if (isPublic && !token) {
+    return response;
+  }
 
   const isPendingRoute = path.startsWith("/pending");
   const isPortalRoute = path.startsWith("/portal");
   const isApiRoute = path.startsWith("/api/");
   const isStaffProtected = isStaffPath(path);
-  const isPublic = isPublicPath(path);
 
   /** Deny by default: every non-public route requires a valid session. */
   const needsAuth = !isPublic;
 
-  const token = request.cookies.get(SESSION_COOKIE)?.value;
   let user: Awaited<ReturnType<typeof verifySessionToken>> = null;
 
   if (token) {
@@ -92,6 +100,16 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (user && user.role !== "client" && isPortalRoute) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/dashboard";
+    return NextResponse.redirect(url);
+  }
+
+  // Role-based route ACL (e.g. employees cannot open /clients)
+  if (user && !canAccessRoute(user.role as UserRole, path)) {
+    if (isApiRoute) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
     return NextResponse.redirect(url);

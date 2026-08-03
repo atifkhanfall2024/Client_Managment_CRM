@@ -23,7 +23,7 @@ export default async function DocumentsPage() {
       <div>
         <h1 className="text-2xl font-bold">Documents</h1>
         <p className="text-slate-500">
-          Files uploaded across clients, projects, and tasks
+          Files uploaded across projects and tasks
         </p>
       </div>
       <Card>

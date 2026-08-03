@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getClient, updateClientAction } from "@/actions/clients";
 import { getAllCompanies } from "@/actions/companies";
 import { getManagersAndEmployees } from "@/actions/users";
 import { getPortalUserStatus } from "@/actions/portal";
 import { requireProfile } from "@/lib/auth";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, canViewFinance } from "@/lib/rbac";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { ClientForm } from "@/components/features/client-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,6 +35,9 @@ export default async function ClientDetailPage({
 }) {
   const { id } = await params;
   const profile = await requireProfile();
+  if (!hasPermission(profile.role, "clients.view")) {
+    redirect("/dashboard");
+  }
 
   let client;
   try {
@@ -53,6 +56,7 @@ export default async function ClientDetailPage({
   );
 
   const canEdit = hasPermission(profile.role, "clients.update");
+  const showFinance = canViewFinance(profile.role);
 
   return (
     <div className="space-y-6">
@@ -69,7 +73,7 @@ export default async function ClientDetailPage({
         </div>
         <div className="text-sm text-slate-500">
           <p>Created {formatDate(client.created_at)}</p>
-          <p>Budget {formatCurrency(client.budget)}</p>
+          {showFinance && <p>Budget {formatCurrency(client.budget)}</p>}
         </div>
       </div>
 
@@ -79,6 +83,7 @@ export default async function ClientDetailPage({
           companies={companies}
           managers={managers}
           client={client}
+          showBudget={showFinance}
         />
       ) : (
         <Card>

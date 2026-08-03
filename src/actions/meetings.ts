@@ -17,10 +17,15 @@ import { meetingSchema } from "@/lib/validations";
 import { enforceRateLimit } from "@/core/security/enforce-rate-limit";
 import type { ActionResult } from "@/core/types/result";
 import type { MeetingStatus } from "@/types/database";
+import { CACHE_TTL, CRM_TAGS, cachedQuery, bustMeetings } from "@/lib/cache";
+import { syncMeetingLifecycle } from "@/lib/meetings/lifecycle";
 
 const notDeleted = {
   $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }],
 };
+
+/** Prevents concurrent double-submits from creating multiple rows. */
+const meetingCreateLocks = new Map<string, Promise<ActionResult>>();
 
 function mapMeeting(row: Record<string, unknown>) {
   return {
@@ -46,12 +51,15 @@ function mapMeeting(row: Record<string, unknown>) {
 
 async function attachMeetingMeta(row: Record<string, unknown>) {
   const base = mapMeeting(row);
-  const [project, manager] = await Promise.all([
+  const [project, manager, client] = await Promise.all([
     ProjectModel.findOne({ id: base.project_id }).select("id name").lean(),
     base.manager_id
       ? UserModel.findOne({ id: base.manager_id })
           .select("id full_name email")
           .lean()
+      : null,
+    base.client_id
+      ? ClientModel.findOne({ id: base.client_id }).select("id name").lean()
       : null,
   ]);
   return {
@@ -66,6 +74,9 @@ async function attachMeetingMeta(row: Record<string, unknown>) {
           email: String(manager.email),
         }
       : null,
+    client: client
+      ? { id: String(client.id), name: String(client.name) }
+      : null,
   };
 }
 
@@ -75,18 +86,33 @@ export async function getMeetings(params?: {
   status?: MeetingStatus;
 }) {
   await requireStaffProfile();
-  await connectMongo();
-  const filter: Record<string, unknown> = { ...notDeleted };
-  if (params?.project_id) filter.project_id = params.project_id;
-  if (params?.client_id) filter.client_id = params.client_id;
-  if (params?.status) filter.status = params.status;
+  await syncMeetingLifecycle();
 
-  const rows = await ProjectMeetingModel.find(filter)
-    .sort({ scheduled_at: 1 })
-    .lean();
+  return cachedQuery(
+    [
+      "meetings-list",
+      params?.project_id ?? "",
+      params?.client_id ?? "",
+      params?.status ?? "",
+    ],
+    [CRM_TAGS.meetings],
+    async () => {
+      await connectMongo();
+      const filter: Record<string, unknown> = { ...notDeleted };
+      if (params?.project_id) filter.project_id = params.project_id;
+      if (params?.client_id) filter.client_id = params.client_id;
+      if (params?.status) filter.status = params.status;
 
-  return Promise.all(
-    rows.map((r) => attachMeetingMeta(r as Record<string, unknown>))
+      const rows = await ProjectMeetingModel.find(filter)
+        .sort({ scheduled_at: 1 })
+        .limit(200)
+        .lean();
+
+      return Promise.all(
+        rows.map((r) => attachMeetingMeta(r as Record<string, unknown>))
+      );
+    },
+    CACHE_TTL.list
   );
 }
 
@@ -155,73 +181,141 @@ async function scheduleMeetingForProject(
     };
   }
 
-  await connectMongo();
-  const project = await ProjectModel.findOne({
-    id: projectId,
-    ...notDeleted,
-  }).lean();
-  if (!project) return { success: false, error: "Project not found" };
+  const lockKey = [
+    profile.id,
+    projectId,
+    parsed.data.title.trim().toLowerCase(),
+    parsed.data.scheduled_at,
+  ].join("|");
 
-  const managerId =
-    parsed.data.manager_id ||
-    (project.manager_id as string | null) ||
-    profile.id;
+  const existingLock = meetingCreateLocks.get(lockKey);
+  if (existingLock) return existingLock;
 
-  const id = newId();
-  await ProjectMeetingModel.create({
-    id,
-    project_id: projectId,
-    client_id: project.client_id,
-    title: parsed.data.title,
-    agenda: parsed.data.agenda || null,
-    notes: parsed.data.notes || null,
-    scheduled_at: parsed.data.scheduled_at,
-    duration_minutes: parsed.data.duration_minutes,
-    location: parsed.data.location || null,
-    meeting_url: parsed.data.meeting_url || null,
-    status: "scheduled",
-    created_by: profile.id,
-    manager_id: managerId,
-    visible_to_client: parsed.data.visible_to_client ?? true,
+  const createPromise = (async (): Promise<ActionResult> => {
+    await connectMongo();
+    const project = await ProjectModel.findOne({
+      id: projectId,
+      ...notDeleted,
+    }).lean();
+    if (!project) return { success: false, error: "Project not found" };
+
+    const managerId =
+      parsed.data.manager_id ||
+      (project.manager_id as string | null) ||
+      profile.id;
+
+    // Block accidental double/triple submits (same meeting within 2 minutes)
+    const recentDuplicate = await ProjectMeetingModel.findOne({
+      project_id: projectId,
+      created_by: profile.id,
+      title: parsed.data.title,
+      scheduled_at: parsed.data.scheduled_at,
+      status: "scheduled",
+      ...notDeleted,
+      created_at: { $gte: new Date(Date.now() - 2 * 60_000) },
+    })
+      .select("id")
+      .lean();
+
+    if (recentDuplicate) {
+      return {
+        success: true,
+        data: { id: String(recentDuplicate.id), duplicate: true },
+      };
+    }
+
+    const id = newId();
+    await ProjectMeetingModel.create({
+      id,
+      project_id: projectId,
+      client_id: project.client_id,
+      title: parsed.data.title,
+      agenda: parsed.data.agenda || null,
+      notes: parsed.data.notes || null,
+      scheduled_at: parsed.data.scheduled_at,
+      duration_minutes: parsed.data.duration_minutes,
+      location: parsed.data.location || null,
+      meeting_url: parsed.data.meeting_url || null,
+      status: "scheduled",
+      created_by: profile.id,
+      manager_id: managerId,
+      visible_to_client: parsed.data.visible_to_client ?? true,
+    });
+
+    await logActivity({
+      action: "meeting.scheduled",
+      entity_type: "meeting",
+      entity_id: id,
+      metadata: { project_id: projectId, title: parsed.data.title },
+    });
+
+    const client = await ClientModel.findOne({
+      id: project.client_id,
+      ...notDeleted,
+    }).lean();
+    if (client?.portal_user_id && (parsed.data.visible_to_client ?? true)) {
+      await createNotification({
+        user_id: String(client.portal_user_id),
+        title: "New project meeting",
+        message: `${parsed.data.title} scheduled for ${project.name}.`,
+        type: "meeting",
+        link: `/portal/projects/${projectId}`,
+      });
+    }
+
+    if (managerId && managerId !== profile.id) {
+      await createNotification({
+        user_id: managerId,
+        title: "Meeting assigned",
+        message: `You have a meeting on ${project.name}: ${parsed.data.title}`,
+        type: "meeting",
+        link: `/projects/${projectId}`,
+      });
+    }
+
+    // Email client when staff/manager schedules a visible meeting
+    if (parsed.data.visible_to_client ?? true) {
+      let clientEmail: string | null =
+        client?.email ? String(client.email) : null;
+      let clientName = client?.name ? String(client.name) : "Client";
+      if (client?.portal_user_id) {
+        const portalUser = await UserModel.findOne({
+          id: client.portal_user_id,
+        })
+          .select("email full_name")
+          .lean();
+        if (portalUser?.email) clientEmail = String(portalUser.email);
+        if (portalUser?.full_name) clientName = String(portalUser.full_name);
+      }
+      if (clientEmail) {
+        const { sendMeetingScheduledEmail } = await import("@/lib/mail");
+        void sendMeetingScheduledEmail({
+          to: clientEmail,
+          recipientName: clientName,
+          scheduledByName: profile.full_name,
+          audience: "client",
+          projectName: String(project.name),
+          title: parsed.data.title,
+          scheduledAt: parsed.data.scheduled_at,
+          durationMinutes: parsed.data.duration_minutes,
+          agenda: parsed.data.agenda,
+          location: parsed.data.location,
+          meetingUrl: parsed.data.meeting_url,
+          linkPath: `/portal/meetings`,
+        });
+      }
+    }
+
+    bustMeetings();
+    revalidatePath(`/projects/${projectId}`);
+    revalidatePath(`/portal/projects/${projectId}`);
+    return { success: true, data: { id } };
+  })().finally(() => {
+    setTimeout(() => meetingCreateLocks.delete(lockKey), 2500);
   });
 
-  await logActivity({
-    action: "meeting.scheduled",
-    entity_type: "meeting",
-    entity_id: id,
-    metadata: { project_id: projectId, title: parsed.data.title },
-  });
-
-  const client = await ClientModel.findOne({
-    id: project.client_id,
-    ...notDeleted,
-  }).lean();
-  if (client?.portal_user_id && (parsed.data.visible_to_client ?? true)) {
-    await createNotification({
-      user_id: String(client.portal_user_id),
-      title: "New project meeting",
-      message: `${parsed.data.title} scheduled for ${project.name}.`,
-      type: "meeting",
-      link: `/portal/projects/${projectId}`,
-    });
-  }
-
-  if (managerId && managerId !== profile.id) {
-    await createNotification({
-      user_id: managerId,
-      title: "Meeting assigned",
-      message: `You have a meeting on ${project.name}: ${parsed.data.title}`,
-      type: "meeting",
-      link: `/projects/${projectId}`,
-    });
-  }
-
-  revalidatePath(`/projects/${projectId}`);
-  revalidatePath("/meetings");
-  revalidatePath("/portal");
-  revalidatePath(`/portal/projects/${projectId}`);
-  revalidatePath("/portal/meetings");
-  return { success: true, data: { id } };
+  meetingCreateLocks.set(lockKey, createPromise);
+  return createPromise;
 }
 
 export async function updateMeetingStatusAction(
@@ -274,8 +368,8 @@ export async function updateMeetingStatusAction(
     });
   }
 
+  bustMeetings();
   revalidatePath(`/projects/${meeting.project_id}`);
-  revalidatePath("/meetings");
   revalidatePath(`/portal/projects/${meeting.project_id}`);
   return { success: true };
 }

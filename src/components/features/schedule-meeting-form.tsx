@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import { createMeetingFromPageAction } from "@/actions/meetings";
 import type { ActionResult } from "@/core/types/result";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+function SubmitMeetingButton() {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" disabled={pending}>
+      {pending ? "Scheduling..." : "Schedule meeting"}
+    </Button>
+  );
+}
 
 export function ScheduleMeetingForm({
   projects,
@@ -48,9 +58,10 @@ export function ScheduleMeetingForm({
       <CardContent>
         <p className="mb-4 text-sm text-muted">
           Project select karke meeting set karein. Client ko dikhne ke liye pehle
-          us client pe <span className="font-medium text-foreground">Enable portal</span>{" "}
-          + Admin <span className="font-medium text-foreground">Approve</span>{" "}
-          hona zaroori hai — phir client{" "}
+          us client pe{" "}
+          <span className="font-medium text-foreground">Enable portal</span> +
+          Admin <span className="font-medium text-foreground">Approve</span> hona
+          zaroori hai — phir client{" "}
           <span className="font-medium text-foreground">/portal</span> pe login
           karke Meetings dekhega.
         </p>
@@ -143,7 +154,7 @@ export function ScheduleMeetingForm({
             </p>
           )}
           <div className="sm:col-span-2">
-            <Button type="submit">Schedule meeting</Button>
+            <SubmitMeetingButton />
           </div>
         </form>
       </CardContent>

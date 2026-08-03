@@ -3,15 +3,19 @@
 import { revalidatePath } from "next/cache";
 import { requireProfile } from "@/lib/auth";
 import { logActivity, createNotification } from "@/lib/activity";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, redactBudget, redactBudgetList } from "@/lib/rbac";
 import { connectMongo } from "@/lib/mongodb";
-import { ClientModel, CompanyModel, newId, toIso } from "@/lib/db/models";
+import { ClientModel, CompanyModel, ProjectModel, newId, toIso } from "@/lib/db/models";
 import { UserModel } from "@/lib/auth/user-model";
 import { clientSchema } from "@/lib/validations";
 import type { ActionResult } from "@/core/types/result";
 import type { Client } from "@/types/database";
 import { PAGE_SIZE } from "@/lib/constants";
+import { CACHE_TTL, CRM_TAGS, cachedQuery, bustClients, bustPortal } from "@/lib/cache";
 
+const notDeleted = {
+  $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }],
+};
 async function attachClientRelations(client: Record<string, unknown>) {
   const [company, manager, creator] = await Promise.all([
     client.company_id
@@ -25,6 +29,18 @@ async function attachClientRelations(client: Record<string, unknown>) {
       : null,
   ]);
 
+  return mapClientRow(client, company, manager, creator);
+}
+
+function mapClientRow(
+  client: Record<string, unknown>,
+  company: { id: string; name: string } | null | undefined,
+  manager:
+    | { id: string; full_name: string; email: string }
+    | null
+    | undefined,
+  creator: { id: string; full_name: string } | null | undefined
+) {
   return {
     id: String(client.id),
     name: String(client.name),
@@ -56,6 +72,53 @@ async function attachClientRelations(client: Record<string, unknown>) {
   };
 }
 
+async function attachClientsBatch(rows: Record<string, unknown>[]) {
+  const companyIds = [
+    ...new Set(
+      rows.map((r) => r.company_id as string | null).filter(Boolean) as string[]
+    ),
+  ];
+  const userIds = [
+    ...new Set(
+      rows
+        .flatMap((r) => [r.assigned_manager_id, r.created_by] as (string | null)[])
+        .filter(Boolean) as string[]
+    ),
+  ];
+
+  const [companies, users] = await Promise.all([
+    companyIds.length
+      ? CompanyModel.find({
+          id: { $in: companyIds },
+          deleted_at: null,
+        })
+          .select("id name")
+          .lean()
+      : Promise.resolve([]),
+    userIds.length
+      ? UserModel.find({ id: { $in: userIds } })
+          .select("id full_name email")
+          .lean()
+      : Promise.resolve([]),
+  ]);
+
+  const companyMap = new Map(companies.map((c) => [String(c.id), c]));
+  const userMap = new Map(users.map((u) => [String(u.id), u]));
+
+  return rows.map((client) =>
+    mapClientRow(
+      client,
+      client.company_id
+        ? companyMap.get(String(client.company_id))
+        : null,
+      client.assigned_manager_id
+        ? userMap.get(String(client.assigned_manager_id))
+        : null,
+      client.created_by ? userMap.get(String(client.created_by)) : null
+    )
+  );
+}
+
 export async function getClients(params?: {
   page?: number;
   search?: string;
@@ -65,7 +128,42 @@ export async function getClients(params?: {
   order?: "asc" | "desc";
 }) {
   const { requireStaffProfile } = await import("@/lib/auth/require-staff");
-  await requireStaffProfile();
+  const profile = await requireStaffProfile();
+  if (!hasPermission(profile.role, "clients.view")) {
+    throw new Error("You do not have access to client records");
+  }
+
+  const cacheKey = [
+    "clients-list",
+    String(params?.page ?? 1),
+    params?.search ?? "",
+    params?.status ?? "",
+    params?.priority ?? "",
+    params?.sort ?? "created_at",
+    params?.order ?? "desc",
+  ];
+
+  const result = await cachedQuery(
+    cacheKey,
+    [CRM_TAGS.clients],
+    () => loadClients(params),
+    CACHE_TTL.list
+  );
+
+  return {
+    ...result,
+    data: redactBudgetList(result.data, profile.role),
+  };
+}
+
+async function loadClients(params?: {
+  page?: number;
+  search?: string;
+  status?: string;
+  priority?: string;
+  sort?: string;
+  order?: "asc" | "desc";
+}) {
   await connectMongo();
   const { safePageParams } = await import("@/lib/security/portal-scope");
   const { page, skip } = safePageParams({
@@ -94,9 +192,7 @@ export async function getClients(params?: {
     .limit(PAGE_SIZE)
     .lean();
 
-  const data = await Promise.all(
-    rows.map((r) => attachClientRelations(r as Record<string, unknown>))
-  );
+  const data = await attachClientsBatch(rows as Record<string, unknown>[]);
 
   return {
     data,
@@ -109,11 +205,15 @@ export async function getClients(params?: {
 
 export async function getClient(id: string): Promise<Record<string, unknown> & { name: string; status: Client["status"]; priority: Client["priority"]; created_at: string; budget: number | null; email: string | null; phone: string | null; website: string | null; industry: string | null; requirements: string | null; company_id: string | null; assigned_manager_id: string | null; deadline: string | null; address: string | null }> {
   const { requireStaffProfile } = await import("@/lib/auth/require-staff");
-  await requireStaffProfile();
+  const profile = await requireStaffProfile();
+  if (!hasPermission(profile.role, "clients.view")) {
+    throw new Error("You do not have access to client records");
+  }
   await connectMongo();
   const client = await ClientModel.findOne({ id, deleted_at: null }).lean();
   if (!client) throw new Error("Client not found");
-  return attachClientRelations(client as Record<string, unknown>);
+  const row = await attachClientRelations(client as Record<string, unknown>);
+  return redactBudget(row, profile.role) as typeof row;
 }
 
 export async function createClientAction(
@@ -174,8 +274,7 @@ export async function createClientAction(
     });
   }
 
-  revalidatePath("/clients");
-  revalidatePath("/dashboard");
+  bustClients();
   return { success: true, data: { id } };
 }
 
@@ -211,7 +310,7 @@ export async function updateClientAction(
 
   await connectMongo();
   const updated = await ClientModel.findOneAndUpdate(
-    { id, deleted_at: null },
+    { id, ...notDeleted },
     {
       ...parsed.data,
       company_id: parsed.data.company_id || null,
@@ -225,6 +324,19 @@ export async function updateClientAction(
 
   if (!updated) return { success: false, error: "Client not found" };
 
+  // Keep linked projects in sync when client budget was empty on the project.
+  const nextBudget = Number(parsed.data.budget ?? 0);
+  if (nextBudget > 0) {
+    await ProjectModel.updateMany(
+      {
+        client_id: id,
+        ...notDeleted,
+        $or: [{ budget: 0 }, { budget: null }, { budget: { $exists: false } }],
+      },
+      { $set: { budget: nextBudget } }
+    );
+  }
+
   await logActivity({
     action: "updated",
     entity_type: "client",
@@ -232,8 +344,10 @@ export async function updateClientAction(
     metadata: { name: updated.name },
   });
 
-  revalidatePath("/clients");
+  bustClients();
+  bustPortal();
   revalidatePath(`/clients/${id}`);
+  revalidatePath("/portal", "layout");
   return { success: true, data: { id } };
 }
 
@@ -255,7 +369,6 @@ export async function softDeleteClientAction(id: string): Promise<ActionResult> 
     entity_id: id,
   });
 
-  revalidatePath("/clients");
-  revalidatePath("/dashboard");
+  bustClients();
   return { success: true };
 }

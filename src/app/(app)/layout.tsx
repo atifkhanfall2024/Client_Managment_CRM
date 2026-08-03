@@ -14,15 +14,10 @@ export default async function AppLayout({
     redirect("/portal");
   }
 
-  let unreadCount = 0;
-  try {
-    unreadCount = await getUnreadCount();
-  } catch {
-    unreadCount = 0;
-  }
+  const unreadCount = await getUnreadCount(profile.id).catch(() => 0);
 
   return (
-    <div className="flex min-h-screen bg-background mesh-bg">
+    <div className="flex min-h-screen bg-background">
       <Sidebar role={profile.role} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header profile={profile} unreadCount={unreadCount} />

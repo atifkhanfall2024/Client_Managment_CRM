@@ -16,7 +16,7 @@ export function Header({
   unreadCount: number;
 }) {
   return (
-    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border bg-card/95 px-4 backdrop-blur lg:px-8">
+    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border bg-card px-4 lg:px-8">
       <div className="pl-12 lg:pl-0">
         <p className="text-sm font-medium text-muted">Welcome back</p>
         <p className="font-semibold text-foreground">{profile.full_name}</p>

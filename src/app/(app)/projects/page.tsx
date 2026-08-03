@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 import { getProjects, softDeleteProjectAction } from "@/actions/projects";
 import { requireProfile } from "@/lib/auth";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, canViewFinance, canViewClients } from "@/lib/rbac";
 import { PROJECT_STATUSES } from "@/lib/constants";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,8 @@ export default async function ProjectsPage({
 }) {
   const params = await searchParams;
   const profile = await requireProfile();
+  const showFinance = canViewFinance(profile.role);
+  const showClients = canViewClients(profile.role);
   const result = await getProjects({
     page: Number(params.page || 1),
     search: params.search,
@@ -40,7 +42,11 @@ export default async function ProjectsPage({
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-2xl font-bold">Projects</h1>
-          <p className="text-slate-500">{result.count} projects</p>
+          <p className="text-slate-500">
+            {showClients
+              ? `${result.count} projects`
+              : `${result.count} projects assigned via your manager`}
+          </p>
         </div>
         {hasPermission(profile.role, "projects.create") && (
           <Button asChild>
@@ -61,11 +67,11 @@ export default async function ProjectsPage({
             <TableHeader>
               <TableRow>
                 <TableHead>Project</TableHead>
-                <TableHead>Client</TableHead>
+                {showClients && <TableHead>Client</TableHead>}
                 <TableHead>Status</TableHead>
                 <TableHead>Priority</TableHead>
                 <TableHead>Progress</TableHead>
-                <TableHead>Budget</TableHead>
+                {showFinance && <TableHead>Budget</TableHead>}
                 <TableHead>Deadline</TableHead>
                 <TableHead />
               </TableRow>
@@ -81,9 +87,12 @@ export default async function ProjectsPage({
                       {project.name}
                     </Link>
                   </TableCell>
-                  <TableCell>
-                    {(project.client as { name?: string } | null)?.name ?? "—"}
-                  </TableCell>
+                  {showClients && (
+                    <TableCell>
+                      {(project.client as { name?: string } | null)?.name ??
+                        "—"}
+                    </TableCell>
+                  )}
                   <TableCell>
                     <StatusBadge value={project.status} />
                   </TableCell>
@@ -101,7 +110,9 @@ export default async function ProjectsPage({
                       <span className="text-xs">{project.progress}%</span>
                     </div>
                   </TableCell>
-                  <TableCell>{formatCurrency(project.budget)}</TableCell>
+                  {showFinance && (
+                    <TableCell>{formatCurrency(project.budget)}</TableCell>
+                  )}
                   <TableCell>{formatDate(project.deadline)}</TableCell>
                   <TableCell>
                     {hasPermission(profile.role, "projects.update") && (

@@ -5,7 +5,7 @@ import { getProjectMeetings } from "@/actions/meetings";
 import { getClientOptions } from "@/actions/options";
 import { getManagersAndEmployees } from "@/actions/users";
 import { requireProfile } from "@/lib/auth";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, canViewFinance } from "@/lib/rbac";
 import { ProjectForm } from "@/components/features/project-form";
 import { ProjectMeetingsPanel } from "@/components/features/project-meetings-panel";
 import { DocumentUploader } from "@/components/features/document-uploader";
@@ -40,6 +40,7 @@ export default async function ProjectDetailPage({
     (u) => u.role === "employee" || u.role === "manager"
   );
   const canUpdate = hasPermission(profile.role, "projects.update");
+  const showFinance = canViewFinance(profile.role);
 
   return (
     <div className="space-y-6">
@@ -53,18 +54,19 @@ export default async function ProjectDetailPage({
           <PriorityBadge value={project.priority} />
         </div>
         <p className="mt-2 text-sm text-muted">
-          Progress update + client meetings yahan manage karein — client portal
-          pe full progress dikhegi.
+          Form mein Status, Progress % aur Priority change karke Update Project
+          dabayein — client portal pe progress update ho jayegi.
         </p>
       </div>
 
       {canUpdate ? (
         <ProjectForm
-          action={updateProjectAction.bind(null, id)}
+          action={updateProjectAction}
           clients={clients}
           managers={managers}
           employees={employees}
           project={project}
+          showBudget={showFinance}
         />
       ) : null}
 

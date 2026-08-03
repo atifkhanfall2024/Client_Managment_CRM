@@ -335,3 +335,133 @@ export async function sendPasswordResetOtpEmail(params: {
 
   return sendMail({ to: params.to, subject, html, text });
 }
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function formatMeetingWhen(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+/** Notify manager or client when a meeting is scheduled. */
+export async function sendMeetingScheduledEmail(params: {
+  to: string;
+  recipientName: string;
+  scheduledByName: string;
+  audience: "manager" | "client";
+  projectName: string;
+  title: string;
+  scheduledAt: string;
+  durationMinutes: number;
+  agenda?: string | null;
+  location?: string | null;
+  meetingUrl?: string | null;
+  linkPath: string;
+}) {
+  const when = formatMeetingWhen(params.scheduledAt);
+  const link = `${appBaseUrl()}${params.linkPath}`;
+  const isManager = params.audience === "manager";
+
+  const subject = isManager
+    ? `${APP_NAME}: Client requested a meeting — ${params.title}`
+    : `${APP_NAME}: New meeting scheduled — ${params.title}`;
+
+  const intro = isManager
+    ? `${params.scheduledByName} has requested a meeting on project "${params.projectName}".`
+    : `${params.scheduledByName} has scheduled a meeting for your project "${params.projectName}".`;
+
+  const details = [
+    `Title: ${params.title}`,
+    `Project: ${params.projectName}`,
+    `When: ${when}`,
+    `Duration: ${params.durationMinutes} minutes`,
+    params.location ? `Location: ${params.location}` : null,
+    params.meetingUrl ? `Meeting link: ${params.meetingUrl}` : null,
+    params.agenda ? `Agenda: ${params.agenda}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const text = [
+    `Dear ${params.recipientName},`,
+    "",
+    intro,
+    "",
+    details,
+    "",
+    `Open in ${APP_NAME}: ${link}`,
+    "",
+    "Kind regards,",
+    `The ${COMPANY_NAME} Team`,
+  ].join("\n");
+
+  const safe = {
+    title: escapeHtml(params.title),
+    project: escapeHtml(params.projectName),
+    when: escapeHtml(when),
+    agenda: params.agenda ? escapeHtml(params.agenda) : null,
+    location: params.location ? escapeHtml(params.location) : null,
+    meetingUrl: params.meetingUrl ? escapeHtml(params.meetingUrl) : null,
+    scheduledBy: escapeHtml(params.scheduledByName),
+    recipient: escapeHtml(params.recipientName),
+  };
+
+  const html = wrapHtml(
+    subject,
+    `
+      <p style="margin:0 0 16px;font-size:16px;">Dear ${safe.recipient},</p>
+      <p style="margin:0 0 16px;line-height:1.55;color:#334155;">
+        ${
+          isManager
+            ? `<strong>${safe.scheduledBy}</strong> has requested a meeting on project <strong>${safe.project}</strong>.`
+            : `<strong>${safe.scheduledBy}</strong> has scheduled a meeting for your project <strong>${safe.project}</strong>.`
+        }
+      </p>
+      <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;margin:0 0 24px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+        <tr><td style="padding:10px 14px;background:#f8fafc;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;">Meeting details</td></tr>
+        <tr><td style="padding:12px 14px;border-top:1px solid #e2e8f0;"><strong>${safe.title}</strong></td></tr>
+        <tr><td style="padding:8px 14px;color:#334155;">When: ${safe.when}</td></tr>
+        <tr><td style="padding:8px 14px;color:#334155;">Duration: ${params.durationMinutes} minutes</td></tr>
+        ${
+          safe.location
+            ? `<tr><td style="padding:8px 14px;color:#334155;">Location: ${safe.location}</td></tr>`
+            : ""
+        }
+        ${
+          safe.meetingUrl
+            ? `<tr><td style="padding:8px 14px;color:#334155;">Link: <a href="${safe.meetingUrl}" style="color:#24548c;">${safe.meetingUrl}</a></td></tr>`
+            : ""
+        }
+        ${
+          safe.agenda
+            ? `<tr><td style="padding:8px 14px 14px;color:#334155;">Agenda: ${safe.agenda}</td></tr>`
+            : ""
+        }
+      </table>
+      <p style="margin:0 0 28px;">
+        <a href="${link}" style="display:inline-block;background:#24548c;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:600;">
+          ${isManager ? "View in CRM" : "Open Client Portal"}
+        </a>
+      </p>
+      <p style="margin:24px 0 0;line-height:1.55;color:#334155;">
+        Kind regards,<br />
+        <strong>The ${COMPANY_NAME} Team</strong>
+      </p>
+    `
+  );
+
+  return sendMail({ to: params.to, subject, html, text });
+}

@@ -56,7 +56,17 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
-  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @keyframes float-y {
@@ -192,18 +202,11 @@ body {
 }
 
 .mesh-bg {
-  background:
-    radial-gradient(ellipse 80% 50% at 10% -5%, rgba(36, 84, 140, 0.28), transparent 55%),
-    radial-gradient(ellipse 60% 45% at 95% 15%, rgba(15, 23, 42, 0.1), transparent 50%),
-    radial-gradient(ellipse 50% 40% at 50% 100%, rgba(184, 204, 227, 0.55), transparent 55%),
-    linear-gradient(165deg, #cfd9e6 0%, #d8e0ea 40%, #c5d3e4 100%);
+  background: linear-gradient(165deg, #d5dde8 0%, #e2e8f0 100%);
 }
 
 .dark .mesh-bg {
-  background:
-    radial-gradient(ellipse 70% 45% at 12% -8%, rgba(107, 147, 196, 0.16), transparent),
-    radial-gradient(ellipse 55% 40% at 92% 8%, rgba(124, 155, 194, 0.08), transparent),
-    linear-gradient(180deg, #0b1018 0%, #121925 100%);
+  background: linear-gradient(180deg, #0b1018 0%, #121925 100%);
 }
 
 .page-panel {

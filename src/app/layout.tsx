@@ -7,11 +7,14 @@ import "./globals.css";
 const display = Outfit({
   variable: "--font-display",
   subsets: ["latin"],
+  display: "swap",
 });
 
 const mono = JetBrains_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+  display: "swap",
+  preload: false,
 });
 
 export const metadata: Metadata = {
@@ -30,6 +33,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
+        suppressHydrationWarning
         className={`${display.variable} ${mono.variable} min-h-screen antialiased`}
       >
         <Providers>{children}</Providers>

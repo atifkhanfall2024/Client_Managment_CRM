@@ -18,6 +18,7 @@ import { hasPermission, isStaffRole } from "@/lib/rbac";
 import { createNotification } from "@/lib/activity";
 import { notifyApproversOfRegistration } from "@/actions/approvals";
 import type { ActionResult } from "@/core/types/result";
+import { bustPortal, bustClients, bustUsers } from "@/lib/cache";
 import type { ApprovalStatus } from "@/types/database";
 
 const notDeleted = {
@@ -45,6 +46,7 @@ export async function getPortalClient() {
     status: String(client.status),
     industry: (client.industry as string | null) ?? null,
     requirements: (client.requirements as string | null) ?? null,
+    budget: Number(client.budget ?? 0),
     portal_user_id: profile.id,
   };
 }
@@ -59,17 +61,99 @@ export async function getPortalProjects() {
     .sort({ updated_at: -1 })
     .lean();
 
-  return rows.map((p) => ({
-    id: String(p.id),
-    name: String(p.name),
-    status: String(p.status),
-    progress: Number(p.progress ?? 0),
-    budget: Number(p.budget ?? 0),
-    deadline: (p.deadline as string | null) ?? null,
-    description: (p.description as string | null) ?? null,
-    priority: String(p.priority),
-    updated_at: toIso(p.updated_at as Date) ?? new Date().toISOString(),
-  }));
+  const clientBudget = Number(client.budget ?? 0);
+
+  return rows.map((p) => {
+    const projectBudget = Number(p.budget ?? 0);
+    return {
+      id: String(p.id),
+      name: String(p.name),
+      status: String(p.status),
+      progress: Number(p.progress ?? 0),
+      budget: projectBudget > 0 ? projectBudget : clientBudget,
+      deadline: (p.deadline as string | null) ?? null,
+      description: (p.description as string | null) ?? null,
+      priority: String(p.priority),
+      manager_id: (p.manager_id as string | null) ?? null,
+      updated_at: toIso(p.updated_at as Date) ?? new Date().toISOString(),
+    };
+  });
+}
+
+/** Managers the client may book with (project managers + assigned manager). */
+export async function getPortalMeetingManagers() {
+  const client = await getPortalClient();
+  await connectMongo();
+
+  const [clientDoc, projects] = await Promise.all([
+    ClientModel.findOne({ id: client.id })
+      .select("assigned_manager_id")
+      .lean(),
+    ProjectModel.find({ client_id: client.id, ...notDeleted })
+      .select("id manager_id name")
+      .lean(),
+  ]);
+
+  const idSet = new Set<string>();
+  if (clientDoc?.assigned_manager_id) {
+    idSet.add(String(clientDoc.assigned_manager_id));
+  }
+  for (const p of projects) {
+    if (p.manager_id) idSet.add(String(p.manager_id));
+  }
+
+  if (idSet.size === 0) return [];
+
+  const users = await UserModel.find({
+    id: { $in: [...idSet] },
+    is_active: true,
+    approval_status: "approved",
+    ...notDeleted,
+  })
+    .select("id full_name email role")
+    .sort({ full_name: 1 })
+    .lean();
+
+  return users.map((u) => {
+    const id = String(u.id);
+    const projectNames = projects
+      .filter((p) => String(p.manager_id) === id)
+      .map((p) => String(p.name));
+    let label = String(u.full_name);
+    if (projectNames.length === 1) {
+      label += ` (${projectNames[0]})`;
+    } else {
+      label += " (Project manager)";
+    }
+    return {
+      id,
+      full_name: String(u.full_name),
+      email: String(u.email),
+      label,
+      project_ids: projects
+        .filter((p) => String(p.manager_id) === id)
+        .map((p) => String(p.id)),
+    };
+  });
+}
+
+async function getAllowedPortalManagerIds(clientId: string) {
+  const [clientDoc, projects] = await Promise.all([
+    ClientModel.findOne({ id: clientId })
+      .select("assigned_manager_id")
+      .lean(),
+    ProjectModel.find({ client_id: clientId, ...notDeleted })
+      .select("manager_id")
+      .lean(),
+  ]);
+  const ids = new Set<string>();
+  if (clientDoc?.assigned_manager_id) {
+    ids.add(String(clientDoc.assigned_manager_id));
+  }
+  for (const p of projects) {
+    if (p.manager_id) ids.add(String(p.manager_id));
+  }
+  return ids;
 }
 
 export async function getPortalProject(projectId: string) {
@@ -126,10 +210,14 @@ export async function getPortalProject(projectId: string) {
       name: String(project.name),
       status: String(project.status),
       progress: Number(project.progress ?? 0),
-      budget: Number(project.budget ?? 0),
+      budget:
+        Number(project.budget ?? 0) > 0
+          ? Number(project.budget ?? 0)
+          : Number(client.budget ?? 0),
       deadline: (project.deadline as string | null) ?? null,
       description: (project.description as string | null) ?? null,
       priority: String(project.priority),
+      manager_id: (project.manager_id as string | null) ?? null,
       updated_at: toIso(project.updated_at as Date) ?? new Date().toISOString(),
     },
     manager: manager
@@ -170,6 +258,8 @@ export async function getPortalProject(projectId: string) {
 
 export async function getPortalMeetings() {
   const client = await getPortalClient();
+  const { syncMeetingLifecycle } = await import("@/lib/meetings/lifecycle");
+  await syncMeetingLifecycle();
   await connectMongo();
   const meetings = await ProjectMeetingModel.find({
     client_id: client.id,
@@ -183,19 +273,40 @@ export async function getPortalMeetings() {
     .lean();
 
   const projectIds = [...new Set(meetings.map((m) => String(m.project_id)))];
-  const projects = projectIds.length
-    ? await ProjectModel.find({ id: { $in: projectIds } })
-        .select("id name")
-        .lean()
-    : [];
+  const managerIds = [
+    ...new Set(
+      meetings
+        .map((m) => (m.manager_id ? String(m.manager_id) : null))
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+  const [projects, managers] = await Promise.all([
+    projectIds.length
+      ? ProjectModel.find({ id: { $in: projectIds } })
+          .select("id name")
+          .lean()
+      : Promise.resolve([]),
+    managerIds.length
+      ? UserModel.find({ id: { $in: managerIds } })
+          .select("id full_name")
+          .lean()
+      : Promise.resolve([]),
+  ]);
   const projectMap = new Map(
     projects.map((p) => [String(p.id), String(p.name)])
+  );
+  const managerMap = new Map(
+    managers.map((u) => [String(u.id), String(u.full_name)])
   );
 
   return meetings.map((m) => ({
     id: String(m.id),
     project_id: String(m.project_id),
     project_name: projectMap.get(String(m.project_id)) ?? "Project",
+    manager_id: m.manager_id ? String(m.manager_id) : null,
+    manager_name: m.manager_id
+      ? managerMap.get(String(m.manager_id)) ?? "Project manager"
+      : "Unassigned",
     title: String(m.title),
     agenda: (m.agenda as string | null) ?? null,
     notes: (m.notes as string | null) ?? null,
@@ -207,10 +318,201 @@ export async function getPortalMeetings() {
   }));
 }
 
-export async function getPortalOverview() {
+/** Client portal: request / schedule a meeting with their project manager. */
+export async function portalScheduleMeetingAction(
+  _prev: ActionResult | null,
+  formData: FormData
+): Promise<ActionResult> {
   const client = await getPortalClient();
-  const projects = await getPortalProjects();
+  const profile = await requireProfile();
+
+  const { meetingSchema } = await import("@/lib/validations");
+  const parsed = meetingSchema.safeParse({
+    title: formData.get("title"),
+    agenda: formData.get("agenda") || null,
+    notes: null,
+    scheduled_at: formData.get("scheduled_at"),
+    duration_minutes: formData.get("duration_minutes") || 30,
+    location: formData.get("location") || null,
+    meeting_url: formData.get("meeting_url") || null,
+    manager_id: formData.get("manager_id") || null,
+    visible_to_client: true,
+  });
+
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid meeting",
+    };
+  }
+
+  const projectId = String(formData.get("project_id") || "").trim();
+  if (!projectId) {
+    return { success: false, error: "Select a project first" };
+  }
+
   await connectMongo();
+  const project = await ProjectModel.findOne({
+    id: projectId,
+    client_id: client.id,
+    ...notDeleted,
+  }).lean();
+  if (!project) {
+    return { success: false, error: "Project not found for your account" };
+  }
+
+  const allowedManagers = await getAllowedPortalManagerIds(client.id);
+  let managerId = parsed.data.manager_id
+    ? String(parsed.data.manager_id)
+    : null;
+
+  if (managerId && !allowedManagers.has(managerId)) {
+    return {
+      success: false,
+      error: "You can only meet with managers assigned to your account",
+    };
+  }
+
+  if (!managerId) {
+    managerId =
+      (project.manager_id as string | null) ||
+      ([...allowedManagers][0] ?? null);
+  }
+
+  if (!managerId) {
+    return {
+      success: false,
+      error: "No manager is assigned yet. Contact support to assign one.",
+    };
+  }
+
+  // Dedup accidental double submit
+  const recent = await ProjectMeetingModel.findOne({
+    project_id: projectId,
+    created_by: profile.id,
+    title: parsed.data.title,
+    scheduled_at: parsed.data.scheduled_at,
+    status: "scheduled",
+    deleted_at: null,
+    created_at: { $gte: new Date(Date.now() - 2 * 60_000) },
+  })
+    .select("id")
+    .lean();
+  if (recent) {
+    return { success: true, data: { id: String(recent.id) } };
+  }
+
+  const id = newId();
+  await ProjectMeetingModel.create({
+    id,
+    project_id: projectId,
+    client_id: client.id,
+    title: parsed.data.title,
+    agenda: parsed.data.agenda || null,
+    notes: null,
+    scheduled_at: parsed.data.scheduled_at,
+    duration_minutes: parsed.data.duration_minutes,
+    location: parsed.data.location || null,
+    meeting_url: parsed.data.meeting_url || null,
+    status: "scheduled",
+    created_by: profile.id,
+    manager_id: managerId,
+    visible_to_client: true,
+  });
+
+  if (managerId) {
+    await createNotification({
+      user_id: managerId,
+      title: "Client requested a meeting",
+      message: `${client.name} scheduled "${parsed.data.title}" on ${project.name}.`,
+      type: "meeting",
+      link: `/projects/${projectId}`,
+    });
+
+    const manager = await UserModel.findOne({ id: managerId })
+      .select("email full_name")
+      .lean();
+    if (manager?.email) {
+      const { sendMeetingScheduledEmail } = await import("@/lib/mail");
+      void sendMeetingScheduledEmail({
+        to: String(manager.email),
+        recipientName: String(manager.full_name || "Manager"),
+        scheduledByName: client.name || profile.full_name,
+        audience: "manager",
+        projectName: String(project.name),
+        title: parsed.data.title,
+        scheduledAt: parsed.data.scheduled_at,
+        durationMinutes: parsed.data.duration_minutes,
+        agenda: parsed.data.agenda,
+        location: parsed.data.location,
+        meetingUrl: parsed.data.meeting_url,
+        linkPath: `/projects/${projectId}`,
+      });
+    }
+  }
+
+  const { bustMeetings, bustPortal } = await import("@/lib/cache");
+  bustMeetings();
+  bustPortal();
+
+  return { success: true, data: { id } };
+}
+
+export async function getPortalOverview() {
+  const profile = await requireProfile();
+  if (profile.role !== "client") {
+    throw new Error("Portal access only");
+  }
+
+  // Live read — budget/progress must not stick to a stale cache entry.
+  return loadPortalOverviewForUser(profile.id);
+}
+
+async function loadPortalOverviewForUser(portalUserId: string) {
+  await connectMongo();
+  const { syncMeetingLifecycle } = await import("@/lib/meetings/lifecycle");
+  await syncMeetingLifecycle();
+  const clientDoc = await ClientModel.findOne({
+    portal_user_id: portalUserId,
+    ...notDeleted,
+  }).lean();
+  if (!clientDoc) {
+    throw new Error("No client record linked to this portal account");
+  }
+
+  const client = {
+    id: String(clientDoc.id),
+    name: String(clientDoc.name),
+    email: (clientDoc.email as string | null) ?? null,
+    phone: (clientDoc.phone as string | null) ?? null,
+    status: String(clientDoc.status),
+    industry: (clientDoc.industry as string | null) ?? null,
+    requirements: (clientDoc.requirements as string | null) ?? null,
+    budget: Number(clientDoc.budget ?? 0),
+    portal_user_id: portalUserId,
+  };
+
+  const projectRows = await ProjectModel.find({
+    client_id: client.id,
+    ...notDeleted,
+  })
+    .sort({ updated_at: -1 })
+    .lean();
+
+  const projects = projectRows.map((p) => {
+    const projectBudget = Number(p.budget ?? 0);
+    return {
+      id: String(p.id),
+      name: String(p.name),
+      status: String(p.status),
+      progress: Number(p.progress ?? 0),
+      budget: projectBudget > 0 ? projectBudget : client.budget,
+      deadline: (p.deadline as string | null) ?? null,
+      description: (p.description as string | null) ?? null,
+      priority: String(p.priority),
+      updated_at: toIso(p.updated_at as Date) ?? new Date().toISOString(),
+    };
+  });
 
   const projectIds = projects.map((p) => p.id);
   const [tasks, documents, meetings] = await Promise.all([
@@ -409,9 +711,10 @@ export async function enableClientPortalAction(
     });
   }
 
+  bustPortal();
+  bustClients();
+  bustUsers();
   revalidatePath(`/clients/${clientId}`);
-  revalidatePath("/clients");
-  revalidatePath("/approvals");
   return {
     success: true,
     data: {

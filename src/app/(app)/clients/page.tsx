@@ -1,8 +1,9 @@
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { getClients, softDeleteClientAction } from "@/actions/clients";
 import { requireProfile } from "@/lib/auth";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, canViewFinance } from "@/lib/rbac";
 import { CLIENT_STATUSES, PRIORITIES } from "@/lib/constants";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,10 @@ export default async function ClientsPage({
 }) {
   const params = await searchParams;
   const profile = await requireProfile();
+  if (!hasPermission(profile.role, "clients.view")) {
+    redirect("/dashboard");
+  }
+  const showFinance = canViewFinance(profile.role);
   const result = await getClients({
     page: Number(params.page || 1),
     search: params.search,
@@ -45,7 +50,7 @@ export default async function ClientsPage({
           <p className="text-slate-500">{result.count} total clients</p>
         </div>
         <div className="flex gap-2">
-          <ExportClientsButton clients={result.data} />
+          {showFinance && <ExportClientsButton clients={result.data} />}
           {hasPermission(profile.role, "clients.create") && (
             <Button asChild>
               <Link href="/clients/new">
@@ -72,7 +77,7 @@ export default async function ClientsPage({
                 <TableHead>Company</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Priority</TableHead>
-                <TableHead>Budget</TableHead>
+                {showFinance && <TableHead>Budget</TableHead>}
                 <TableHead>Manager</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead />
@@ -81,7 +86,10 @@ export default async function ClientsPage({
             <TableBody>
               {result.data.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="py-10 text-center text-slate-500">
+                  <TableCell
+                    colSpan={showFinance ? 8 : 7}
+                    className="py-10 text-center text-slate-500"
+                  >
                     No clients found.
                   </TableCell>
                 </TableRow>
@@ -106,7 +114,9 @@ export default async function ClientsPage({
                   <TableCell>
                     <PriorityBadge value={client.priority} />
                   </TableCell>
-                  <TableCell>{formatCurrency(client.budget)}</TableCell>
+                  {showFinance && (
+                    <TableCell>{formatCurrency(client.budget)}</TableCell>
+                  )}
                   <TableCell>
                     {(client.assigned_manager as { full_name?: string } | null)
                       ?.full_name ?? "—"}

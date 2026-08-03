@@ -1,7 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    /** Client Router Cache — revisiting pages feels instant. */
+    staleTimes: {
+      dynamic: 0,
+      static: 180,
+    },
+  },
 };
 
 export default nextConfig;

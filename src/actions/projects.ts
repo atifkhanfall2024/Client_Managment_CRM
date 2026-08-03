@@ -11,6 +11,19 @@ import { projectSchema } from "@/lib/validations";
 import type { ActionResult } from "@/core/types/result";
 import type { PriorityLevel, ProjectStatus } from "@/types/database";
 import { PAGE_SIZE } from "@/lib/constants";
+import {
+  CACHE_TTL,
+  CRM_TAGS,
+  cachedQuery,
+  bustProjects,
+  bustPortal,
+} from "@/lib/cache";
+import {
+  redactBudget,
+  redactBudgetList,
+  redactClientInfo,
+  redactClientInfoList,
+} from "@/lib/rbac";
 
 async function attachProject(project: Record<string, unknown>) {
   const [client, manager, members] = await Promise.all([
@@ -23,12 +36,26 @@ async function attachProject(project: Record<string, unknown>) {
     }).lean(),
   ]);
 
+  return mapProjectRow(project, client, manager, members);
+}
+
+function mapProjectRow(
+  project: Record<string, unknown>,
+  client:
+    | { id: string; name: string; budget?: number | null }
+    | null
+    | undefined,
+  manager: { id: string; full_name: string } | null | undefined,
+  members: { id: string; full_name: string; email: string }[]
+) {
+  const projectBudget = Number(project.budget ?? 0);
+  const clientBudget = Number(client?.budget ?? 0);
   return {
     id: String(project.id),
     name: String(project.name),
     client_id: String(project.client_id),
     description: (project.description as string | null) ?? null,
-    budget: Number(project.budget ?? 0),
+    budget: projectBudget > 0 ? projectBudget : clientBudget,
     deadline: (project.deadline as string | null) ?? null,
     priority: project.priority as PriorityLevel,
     status: project.status as ProjectStatus,
@@ -56,6 +83,54 @@ async function attachProject(project: Record<string, unknown>) {
   };
 }
 
+async function attachProjectsBatch(rows: Record<string, unknown>[]) {
+  const clientIds = [
+    ...new Set(rows.map((r) => String(r.client_id)).filter(Boolean)),
+  ];
+  const userIds = [
+    ...new Set(
+      rows.flatMap((r) => [
+        ...(r.manager_id ? [String(r.manager_id)] : []),
+        ...((r.member_ids as string[]) ?? []).map(String),
+      ])
+    ),
+  ];
+
+  const [clients, users] = await Promise.all([
+    clientIds.length
+      ? ClientModel.find({ id: { $in: clientIds } })
+          .select("id name budget")
+          .lean()
+      : Promise.resolve([]),
+    userIds.length
+      ? UserModel.find({ id: { $in: userIds } })
+          .select("id full_name email")
+          .lean()
+      : Promise.resolve([]),
+  ]);
+
+  const clientMap = new Map(clients.map((c) => [String(c.id), c]));
+  const userMap = new Map(users.map((u) => [String(u.id), u]));
+
+  return rows.map((project) => {
+    const memberIds = ((project.member_ids as string[]) ?? []).map(String);
+    return mapProjectRow(
+      project,
+      clientMap.get(String(project.client_id)),
+      project.manager_id
+        ? userMap.get(String(project.manager_id))
+        : null,
+      memberIds
+        .map((id) => userMap.get(id))
+        .filter(Boolean) as {
+        id: string;
+        full_name: string;
+        email: string;
+      }[]
+    );
+  });
+}
+
 export async function getProjects(params?: {
   page?: number;
   search?: string;
@@ -64,7 +139,38 @@ export async function getProjects(params?: {
   order?: "asc" | "desc";
 }) {
   const { requireStaffProfile } = await import("@/lib/auth/require-staff");
-  await requireStaffProfile();
+  const profile = await requireStaffProfile();
+
+  const result = await cachedQuery(
+    [
+      "projects-list",
+      String(params?.page ?? 1),
+      params?.search ?? "",
+      params?.status ?? "",
+      params?.sort ?? "created_at",
+      params?.order ?? "desc",
+    ],
+    [CRM_TAGS.projects],
+    () => loadProjects(params),
+    CACHE_TTL.list
+  );
+
+  return {
+    ...result,
+    data: redactClientInfoList(
+      redactBudgetList(result.data, profile.role),
+      profile.role
+    ),
+  };
+}
+
+async function loadProjects(params?: {
+  page?: number;
+  search?: string;
+  status?: string;
+  sort?: string;
+  order?: "asc" | "desc";
+}) {
   await connectMongo();
   const page = params?.page ?? 1;
   const filter: Record<string, unknown> = { deleted_at: null };
@@ -82,9 +188,7 @@ export async function getProjects(params?: {
     .limit(PAGE_SIZE)
     .lean();
 
-  const data = await Promise.all(
-    rows.map((r) => attachProject(r as Record<string, unknown>))
-  );
+  const data = await attachProjectsBatch(rows as Record<string, unknown>[]);
 
   return {
     data,
@@ -115,11 +219,12 @@ export async function getProject(id: string): Promise<{
   members: { id: string; project_id: string; user_id: string; profile: { id: string; full_name: string; email: string } }[];
 }> {
   const { requireStaffProfile } = await import("@/lib/auth/require-staff");
-  await requireStaffProfile();
+  const profile = await requireStaffProfile();
   await connectMongo();
   const project = await ProjectModel.findOne({ id, deleted_at: null }).lean();
   if (!project) throw new Error("Project not found");
-  return attachProject(project as Record<string, unknown>);
+  const row = await attachProject(project as Record<string, unknown>);
+  return redactClientInfo(redactBudget(row, profile.role), profile.role);
 }
 
 export async function createProjectAction(
@@ -153,9 +258,18 @@ export async function createProjectAction(
   const id = newId();
   const { member_ids, ...projectData } = parsed.data;
 
+  let budget = Number(projectData.budget ?? 0);
+  if (budget <= 0 && projectData.client_id) {
+    const client = await ClientModel.findOne({ id: projectData.client_id })
+      .select("budget")
+      .lean();
+    budget = Number(client?.budget ?? 0);
+  }
+
   await ProjectModel.create({
     id,
     ...projectData,
+    budget,
     manager_id: projectData.manager_id || profile.id,
     deadline: projectData.deadline || null,
     member_ids: member_ids ?? [],
@@ -178,13 +292,12 @@ export async function createProjectAction(
     metadata: { name: projectData.name },
   });
 
-  revalidatePath("/projects");
-  revalidatePath("/dashboard");
+  bustProjects();
+  bustPortal();
   return { success: true, data: { id } };
 }
 
 export async function updateProjectAction(
-  id: string,
   _prev: ActionResult | null,
   formData: FormData
 ): Promise<ActionResult> {
@@ -193,49 +306,84 @@ export async function updateProjectAction(
     return { success: false, error: "Permission denied" };
   }
 
+  const id = String(formData.get("id") || "").trim();
+  if (!id) {
+    return { success: false, error: "Project id missing" };
+  }
+
   const memberIds = formData.getAll("member_ids").filter(Boolean) as string[];
   const parsed = projectSchema.safeParse({
     name: formData.get("name"),
     client_id: formData.get("client_id"),
     description: formData.get("description") || "",
-    budget: formData.get("budget") || 0,
+    budget: formData.get("budget") ?? 0,
     deadline: formData.get("deadline") || null,
     priority: formData.get("priority") || "medium",
     status: formData.get("status") || "planning",
-    progress: formData.get("progress") || 0,
+    progress: formData.get("progress") ?? 0,
     manager_id: formData.get("manager_id") || null,
     member_ids: memberIds,
   });
 
   if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message };
+    return {
+      success: false,
+      error: parsed.error.issues.map((i) => i.message).join(" · "),
+    };
   }
 
   await connectMongo();
   const { member_ids, ...projectData } = parsed.data;
+
+  let budget = Number(projectData.budget ?? 0);
+  if (budget <= 0 && projectData.client_id) {
+    const client = await ClientModel.findOne({ id: projectData.client_id })
+      .select("budget")
+      .lean();
+    budget = Number(client?.budget ?? 0);
+  }
+
   const updated = await ProjectModel.findOneAndUpdate(
-    { id, deleted_at: null },
+    { id },
     {
-      ...projectData,
-      deadline: projectData.deadline || null,
-      manager_id: projectData.manager_id || null,
-      member_ids: member_ids ?? [],
+      $set: {
+        name: projectData.name,
+        client_id: projectData.client_id,
+        description: projectData.description || null,
+        budget,
+        deadline: projectData.deadline || null,
+        priority: projectData.priority,
+        status: projectData.status,
+        progress: Number(projectData.progress ?? 0),
+        manager_id: projectData.manager_id || null,
+        member_ids: member_ids ?? [],
+      },
     },
-    { new: true }
+    { returnDocument: "after" }
   ).lean();
 
-  if (!updated) return { success: false, error: "Project not found" };
+  if (!updated || updated.deleted_at) {
+    return { success: false, error: "Project not found" };
+  }
 
   await logActivity({
     action: "updated",
     entity_type: "project",
     entity_id: id,
-    metadata: { name: updated.name, status: updated.status },
+    metadata: {
+      name: updated.name,
+      status: updated.status,
+      progress: updated.progress,
+      priority: updated.priority,
+    },
   });
 
+  bustProjects();
+  bustPortal();
   revalidatePath("/projects");
   revalidatePath(`/projects/${id}`);
   revalidatePath("/dashboard");
+  revalidatePath("/portal", "layout");
   return { success: true, data: { id } };
 }
 
@@ -252,6 +400,6 @@ export async function softDeleteProjectAction(id: string): Promise<ActionResult>
     entity_type: "project",
     entity_id: id,
   });
-  revalidatePath("/projects");
+  bustProjects();
   return { success: true };
 }

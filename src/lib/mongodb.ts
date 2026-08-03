@@ -55,8 +55,8 @@ export async function connectMongo() {
         maxPoolSize: Number(process.env.MONGO_MAX_POOL ?? 50),
         minPoolSize: Number(process.env.MONGO_MIN_POOL ?? 2),
         maxIdleTimeMS: 30_000,
-        serverSelectionTimeoutMS: 8_000,
-        socketTimeoutMS: 45_000,
+        serverSelectionTimeoutMS: 5_000,
+        socketTimeoutMS: 30_000,
       })
       .then((m) => m)
       .catch((err) => {

@@ -13,39 +13,51 @@ import {
 } from "@/lib/security/approvals-policy";
 import type { ActionResult } from "@/core/types/result";
 import type { UserRole } from "@/types/database";
+import { CACHE_TTL, CRM_TAGS, cachedQuery, bustUsers, bustPortal } from "@/lib/cache";
 
 export async function getPendingUsers() {
   const profile = await requireProfile();
-  await connectMongo();
 
-  await UserModel.updateMany(
-    {
-      role: { $ne: "super_admin" },
-      $or: [{ approval_status: { $exists: false } }, { approval_status: null }],
+  return cachedQuery(
+    ["pending-users", profile.id, profile.role],
+    [CRM_TAGS.approvals, CRM_TAGS.users],
+    async () => {
+      await connectMongo();
+
+      await UserModel.updateMany(
+        {
+          role: { $ne: "super_admin" },
+          $or: [
+            { approval_status: { $exists: false } },
+            { approval_status: null },
+          ],
+        },
+        { $set: { approval_status: "pending" } }
+      );
+
+      const roles = pendingRolesForActor(profile.role);
+      if (!roles?.length) return [];
+
+      const rows = await UserModel.find({
+        approval_status: "pending",
+        role: { $in: roles },
+        $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }],
+      })
+        .sort({ created_at: -1 })
+        .lean();
+
+      return rows.map((u) => ({
+        id: String(u.id),
+        email: String(u.email),
+        full_name: String(u.full_name),
+        role: u.role as UserRole,
+        created_at: u.created_at
+          ? new Date(u.created_at as Date).toISOString()
+          : new Date().toISOString(),
+      }));
     },
-    { $set: { approval_status: "pending" } }
+    CACHE_TTL.list
   );
-
-  const roles = pendingRolesForActor(profile.role);
-  if (!roles) return [];
-
-  const rows = await UserModel.find({
-    approval_status: "pending",
-    role: { $in: roles },
-    $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }],
-  })
-    .sort({ created_at: -1 })
-    .lean();
-
-  return rows.map((u) => ({
-    id: String(u.id),
-    email: String(u.email),
-    full_name: String(u.full_name),
-    role: u.role as UserRole,
-    created_at: u.created_at
-      ? new Date(u.created_at as Date).toISOString()
-      : new Date().toISOString(),
-  }));
 }
 
 export async function approveUserAction(userId: string): Promise<ActionResult> {
@@ -95,11 +107,9 @@ export async function approveUserAction(userId: string): Promise<ActionResult> {
     console.error("[approvals] approval email failed:", error);
   }
 
-  revalidatePath("/approvals");
-  revalidatePath("/users");
-  revalidatePath("/dashboard");
+  bustUsers();
+  bustPortal();
   revalidatePath("/pending");
-  revalidatePath("/portal");
   return { success: true };
 }
 
@@ -138,8 +148,7 @@ export async function rejectUserAction(userId: string): Promise<ActionResult> {
     console.error("[approvals] rejection email failed:", error);
   }
 
-  revalidatePath("/approvals");
-  revalidatePath("/users");
+  bustUsers();
   return { success: true };
 }
 

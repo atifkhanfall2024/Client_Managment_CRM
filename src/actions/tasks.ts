@@ -17,19 +17,35 @@ import { commentSchema, taskSchema } from "@/lib/validations";
 import type { ActionResult } from "@/core/types/result";
 import type { PriorityLevel, TaskStatus } from "@/types/database";
 import { PAGE_SIZE } from "@/lib/constants";
+import { CACHE_TTL, CRM_TAGS, cachedQuery, bustTasks } from "@/lib/cache";
 
-async function attachTask(task: Record<string, unknown>) {
+async function attachTask(
+  task: Record<string, unknown>,
+  options?: { includeComments?: boolean }
+) {
+  const includeComments = options?.includeComments !== false;
   const [project, assignee, comments] = await Promise.all([
-    ProjectModel.findOne({ id: task.project_id }).lean(),
+    ProjectModel.findOne({ id: task.project_id }).select("id name").lean(),
     task.assigned_to
-      ? UserModel.findOne({ id: task.assigned_to }).lean()
+      ? UserModel.findOne({ id: task.assigned_to })
+          .select("id full_name")
+          .lean()
       : null,
-    TaskCommentModel.find({ task_id: task.id }).sort({ created_at: 1 }).lean(),
+    includeComments
+      ? TaskCommentModel.find({ task_id: task.id })
+          .sort({ created_at: 1 })
+          .lean()
+      : Promise.resolve([]),
   ]);
 
-  const commentUsers = await UserModel.find({
-    id: { $in: comments.map((c) => c.user_id) },
-  }).lean();
+  const commentUsers =
+    comments.length > 0
+      ? await UserModel.find({
+          id: { $in: comments.map((c) => c.user_id) },
+        })
+          .select("id full_name")
+          .lean()
+      : [];
   const userMap = new Map(commentUsers.map((u) => [String(u.id), u]));
 
   return {
@@ -67,6 +83,70 @@ async function attachTask(task: Record<string, unknown>) {
   };
 }
 
+async function attachTasksListBatch(rows: Record<string, unknown>[]) {
+  const projectIds = [
+    ...new Set(rows.map((r) => String(r.project_id)).filter(Boolean)),
+  ];
+  const assigneeIds = [
+    ...new Set(
+      rows
+        .map((r) => r.assigned_to as string | null)
+        .filter(Boolean) as string[]
+    ),
+  ];
+
+  const [projects, assignees] = await Promise.all([
+    projectIds.length
+      ? ProjectModel.find({ id: { $in: projectIds } })
+          .select("id name")
+          .lean()
+      : Promise.resolve([]),
+    assigneeIds.length
+      ? UserModel.find({ id: { $in: assigneeIds } })
+          .select("id full_name")
+          .lean()
+      : Promise.resolve([]),
+  ]);
+
+  const projectMap = new Map(projects.map((p) => [String(p.id), p]));
+  const assigneeMap = new Map(assignees.map((u) => [String(u.id), u]));
+
+  return rows.map((task) => {
+    const project = projectMap.get(String(task.project_id));
+    const assignee = task.assigned_to
+      ? assigneeMap.get(String(task.assigned_to))
+      : null;
+    return {
+      id: String(task.id),
+      title: String(task.title),
+      description: (task.description as string | null) ?? null,
+      project_id: String(task.project_id),
+      assigned_to: (task.assigned_to as string | null) ?? null,
+      due_date: (task.due_date as string | null) ?? null,
+      priority: task.priority as PriorityLevel,
+      status: task.status as TaskStatus,
+      created_by: (task.created_by as string | null) ?? null,
+      created_at: toIso(task.created_at as Date) ?? new Date().toISOString(),
+      updated_at: toIso(task.updated_at as Date) ?? new Date().toISOString(),
+      deleted_at: toIso(task.deleted_at as Date | null),
+      project: project
+        ? { id: String(project.id), name: String(project.name) }
+        : null,
+      assignee: assignee
+        ? { id: String(assignee.id), full_name: String(assignee.full_name) }
+        : null,
+      comments: [] as {
+        id: string;
+        task_id: string;
+        user_id: string;
+        content: string;
+        created_at: string;
+        profile: { id: string; full_name: string } | null;
+      }[],
+    };
+  });
+}
+
 export async function getTasks(params?: {
   page?: number;
   search?: string;
@@ -79,36 +159,53 @@ export async function getTasks(params?: {
   if (profile.role === "client") {
     throw new Error("Use the client portal for your tasks");
   }
-  await connectMongo();
-  const page = params?.page ?? 1;
-  const filter: Record<string, unknown> = { deleted_at: null };
 
-  if (params?.search) filter.title = { $regex: params.search, $options: "i" };
-  if (params?.status) filter.status = params.status;
-  if (params?.project_id) filter.project_id = params.project_id;
-  if (params?.assigned_to) filter.assigned_to = params.assigned_to;
-  if (params?.mine || profile.role === "employee") {
-    filter.assigned_to = profile.id;
-  }
+  const scopedMine = Boolean(params?.mine || profile.role === "employee");
 
-  const count = await TaskModel.countDocuments(filter);
-  const rows = await TaskModel.find(filter)
-    .sort({ created_at: -1 })
-    .skip((page - 1) * PAGE_SIZE)
-    .limit(PAGE_SIZE)
-    .lean();
+  return cachedQuery(
+    [
+      "tasks-list",
+      profile.id,
+      String(params?.page ?? 1),
+      params?.search ?? "",
+      params?.status ?? "",
+      params?.project_id ?? "",
+      params?.assigned_to ?? "",
+      scopedMine ? "1" : "0",
+    ],
+    [CRM_TAGS.tasks],
+    async () => {
+      await connectMongo();
+      const page = params?.page ?? 1;
+      const filter: Record<string, unknown> = { deleted_at: null };
 
-  const data = await Promise.all(
-    rows.map((r) => attachTask(r as Record<string, unknown>))
+      if (params?.search) filter.title = { $regex: params.search, $options: "i" };
+      if (params?.status) filter.status = params.status;
+      if (params?.project_id) filter.project_id = params.project_id;
+      if (params?.assigned_to) filter.assigned_to = params.assigned_to;
+      if (scopedMine) {
+        filter.assigned_to = profile.id;
+      }
+
+      const count = await TaskModel.countDocuments(filter);
+      const rows = await TaskModel.find(filter)
+        .sort({ created_at: -1 })
+        .skip((page - 1) * PAGE_SIZE)
+        .limit(PAGE_SIZE)
+        .lean();
+
+      const data = await attachTasksListBatch(rows as Record<string, unknown>[]);
+
+      return {
+        data,
+        count,
+        page,
+        pageSize: PAGE_SIZE,
+        totalPages: Math.max(1, Math.ceil(count / PAGE_SIZE)),
+      };
+    },
+    CACHE_TTL.list
   );
-
-  return {
-    data,
-    count,
-    page,
-    pageSize: PAGE_SIZE,
-    totalPages: Math.max(1, Math.ceil(count / PAGE_SIZE)),
-  };
 }
 
 export async function getTask(id: string) {
@@ -167,8 +264,7 @@ export async function createTaskAction(
     metadata: { title: parsed.data.title },
   });
 
-  revalidatePath("/tasks");
-  revalidatePath("/dashboard");
+  bustTasks();
   return { success: true, data: { id } };
 }
 
@@ -216,9 +312,8 @@ export async function updateTaskAction(
     metadata: { title: updated.title, status: updated.status },
   });
 
-  revalidatePath("/tasks");
+  bustTasks();
   revalidatePath(`/tasks/${id}`);
-  revalidatePath("/dashboard");
   return { success: true, data: { id } };
 }
 
@@ -245,6 +340,7 @@ export async function addTaskCommentAction(
     content: parsed.data.content,
   });
 
+  bustTasks();
   revalidatePath(`/tasks/${taskId}`);
   return { success: true, data: { id } };
 }
@@ -262,6 +358,6 @@ export async function softDeleteTaskAction(id: string): Promise<ActionResult> {
     entity_type: "task",
     entity_id: id,
   });
-  revalidatePath("/tasks");
+  bustTasks();
   return { success: true };
 }

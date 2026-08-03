@@ -10,6 +10,7 @@ import { userManageSchema, profileUpdateSchema } from "@/lib/validations";
 import type { ActionResult } from "@/core/types/result";
 import type { Profile, UserRole } from "@/types/database";
 import { PAGE_SIZE } from "@/lib/constants";
+import { bustUsers } from "@/lib/cache";
 
 function mapUser(doc: Record<string, unknown>): Profile {
   return {
@@ -191,7 +192,7 @@ export async function updateUserAction(
     metadata: { role: updated.role },
   });
 
-  revalidatePath("/users");
+  bustUsers();
   return { success: true, data: mapUser(updated as Record<string, unknown>) };
 }
 
@@ -218,6 +219,7 @@ export async function updateOwnProfileAction(
     }
   );
 
+  bustUsers();
   revalidatePath("/settings");
   return { success: true };
 }
@@ -243,6 +245,6 @@ export async function softDeleteUserAction(id: string): Promise<ActionResult> {
     entity_id: id,
   });
 
-  revalidatePath("/users");
+  bustUsers();
   return { success: true };
 }

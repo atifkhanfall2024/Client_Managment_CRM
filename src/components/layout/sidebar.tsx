@@ -18,6 +18,7 @@ import {
   X,
   UserCheck,
   CalendarDays,
+  MessageSquarePlus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { APP_NAME } from "@/lib/constants";
@@ -51,7 +52,13 @@ const navItems: {
     href: "/meetings",
     label: "Meetings",
     icon: CalendarDays,
-    permission: "projects.view",
+    permission: "clients.view",
+  },
+  {
+    href: "/feedback",
+    label: "Feedback",
+    icon: MessageSquarePlus,
+    permission: "clients.view",
   },
   { href: "/tasks", label: "Tasks", icon: CheckSquare, permission: "tasks.view" },
   {

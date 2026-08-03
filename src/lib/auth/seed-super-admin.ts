@@ -7,44 +7,59 @@ import {
 } from "@/lib/constants";
 
 let seeded = false;
+let seeding: Promise<void> | null = null;
 
-/** Ensures fixed Super Admin accounts exist and stay approved. */
+/** Ensures fixed Super Admin accounts exist. Does not re-hash on every request. */
 export async function ensureSuperAdmin() {
   if (seeded) return;
-  await connectMongo();
+  if (seeding) return seeding;
 
-  const passwordHash = await hash(SUPER_ADMIN_PASSWORD, 12);
+  seeding = (async () => {
+    await connectMongo();
 
-  for (const account of SUPER_ADMIN_ACCOUNTS) {
-    const email = account.email.toLowerCase();
-    const existing = await UserModel.findOne({ email })
-      .select("+passwordHash")
-      .lean();
+    for (const account of SUPER_ADMIN_ACCOUNTS) {
+      const email = account.email.toLowerCase();
+      const existing = await UserModel.findOne({ email })
+        .select("id role is_active approval_status deleted_at")
+        .lean();
 
-    if (!existing) {
-      await UserModel.create({
-        id: crypto.randomUUID(),
-        email,
-        passwordHash,
-        full_name: account.full_name,
-        role: "super_admin",
-        is_active: true,
-        approval_status: "approved",
-      });
-    } else {
-      await UserModel.updateOne(
-        { email },
-        {
-          role: "super_admin",
-          approval_status: "approved",
-          is_active: true,
-          deleted_at: null,
+      if (!existing) {
+        const passwordHash = await hash(SUPER_ADMIN_PASSWORD, 10);
+        await UserModel.create({
+          id: crypto.randomUUID(),
+          email,
           passwordHash,
           full_name: account.full_name,
-        }
-      );
-    }
-  }
+          role: "super_admin",
+          is_active: true,
+          approval_status: "approved",
+        });
+        continue;
+      }
 
-  seeded = true;
+      if (
+        existing.role !== "super_admin" ||
+        !existing.is_active ||
+        existing.approval_status !== "approved" ||
+        existing.deleted_at
+      ) {
+        await UserModel.updateOne(
+          { email },
+          {
+            role: "super_admin",
+            approval_status: "approved",
+            is_active: true,
+            deleted_at: null,
+            full_name: account.full_name,
+          }
+        );
+      }
+    }
+
+    seeded = true;
+  })().finally(() => {
+    seeding = null;
+  });
+
+  return seeding;
 }

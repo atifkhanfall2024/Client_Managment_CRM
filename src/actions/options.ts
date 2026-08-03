@@ -2,8 +2,14 @@
 
 import { connectMongo } from "@/lib/mongodb";
 import { ClientModel, ProjectModel } from "@/lib/db/models";
+import { requireStaffProfile } from "@/lib/auth/require-staff";
+import { hasPermission } from "@/lib/rbac";
 
 export async function getClientOptions() {
+  const profile = await requireStaffProfile();
+  if (!hasPermission(profile.role, "clients.view")) {
+    return [];
+  }
   await connectMongo();
   const rows = await ClientModel.find({ deleted_at: null })
     .sort({ name: 1 })
@@ -13,6 +19,7 @@ export async function getClientOptions() {
 }
 
 export async function getProjectOptions() {
+  await requireStaffProfile();
   await connectMongo();
   const rows = await ProjectModel.find({ deleted_at: null })
     .sort({ name: 1 })

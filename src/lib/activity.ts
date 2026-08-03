@@ -2,6 +2,7 @@ import { connectMongo } from "@/lib/mongodb";
 import { ActivityLogModel, NotificationModel, newId } from "@/lib/db/models";
 import { getSession } from "@/lib/auth/session";
 import type { EntityType } from "@/types/database";
+import { bustCache, bustNotifications, CRM_TAGS } from "@/lib/cache";
 
 export async function logActivity(params: {
   action: string;
@@ -20,6 +21,8 @@ export async function logActivity(params: {
     entity_id: params.entity_id ?? null,
     metadata: params.metadata ?? {},
   });
+
+  bustCache({ tags: [CRM_TAGS.activity, CRM_TAGS.dashboard] });
 }
 
 export async function createNotification(params: {
@@ -38,4 +41,5 @@ export async function createNotification(params: {
     type: params.type ?? "info",
     link: params.link ?? null,
   });
+  bustNotifications();
 }

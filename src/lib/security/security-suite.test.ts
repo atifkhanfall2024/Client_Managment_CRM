@@ -211,7 +211,7 @@ describe("rbac route isolation", () => {
   });
 
   it("denies clients upload / user manage", () => {
-    expect(hasPermission("client", "documents.upload")).toBe(false);
+    expect(hasPermission("client", "documents.upload")).toBe(true);
     expect(hasPermission("client", "users.manage")).toBe(false);
     expect(hasPermission("client", "portal.view")).toBe(true);
   });

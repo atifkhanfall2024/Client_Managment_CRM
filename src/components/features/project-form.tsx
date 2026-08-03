@@ -18,6 +18,7 @@ export function ProjectForm({
   employees,
   project,
   defaultManagerId,
+  showBudget = true,
 }: {
   action: (
     prev: ActionResult | null,
@@ -38,22 +39,34 @@ export function ProjectForm({
     progress?: number;
     manager_id?: string | null;
     members?: { user_id: string }[];
+    updated_at?: string;
   };
   defaultManagerId?: string;
+  showBudget?: boolean;
 }) {
   const router = useRouter();
-  const selectedMembers =
-    project?.members?.map((m) => m.user_id) ?? [];
+  const selectedMembers = project?.members?.map((m) => m.user_id) ?? [];
+  const isEdit = Boolean(project?.id);
 
   return (
     <Card>
       <CardContent className="pt-6">
         <FormShell
+          key={project?.updated_at ?? "new"}
           action={action}
-          submitLabel={project ? "Update Project" : "Create Project"}
-          onSuccess={() => router.push("/projects")}
+          submitLabel={isEdit ? "Update Project" : "Create Project"}
+          onSuccess={() => {
+            if (isEdit) {
+              router.refresh();
+            } else {
+              router.push("/projects");
+            }
+          }}
           className="grid gap-4 sm:grid-cols-2"
         >
+          {isEdit && (
+            <input type="hidden" name="id" value={project?.id ?? ""} />
+          )}
           <div className="space-y-2 sm:col-span-2">
             <Label htmlFor="name">Project Name *</Label>
             <Input id="name" name="name" required defaultValue={project?.name} />
@@ -66,7 +79,9 @@ export function ProjectForm({
               required
               defaultValue={project?.client_id ?? ""}
             >
-              <option value="">Select client</option>
+              <option value="" disabled>
+                Select client
+              </option>
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -81,6 +96,7 @@ export function ProjectForm({
               name="manager_id"
               defaultValue={project?.manager_id ?? defaultManagerId ?? ""}
             >
+              <option value="">Unassigned</option>
               {managers.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.full_name}
@@ -88,16 +104,20 @@ export function ProjectForm({
               ))}
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="budget">Budget</Label>
-            <Input
-              id="budget"
-              name="budget"
-              type="number"
-              min={0}
-              defaultValue={project?.budget ?? 0}
-            />
-          </div>
+          {showBudget ? (
+            <div className="space-y-2">
+              <Label htmlFor="budget">Budget</Label>
+              <Input
+                id="budget"
+                name="budget"
+                type="number"
+                min={0}
+                defaultValue={project?.budget ?? 0}
+              />
+            </div>
+          ) : (
+            <input type="hidden" name="budget" value={project?.budget ?? 0} />
+          )}
           <div className="space-y-2">
             <Label htmlFor="deadline">Deadline</Label>
             <Input
@@ -107,44 +127,58 @@ export function ProjectForm({
               defaultValue={project?.deadline ?? ""}
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="priority">Priority</Label>
-            <Select
-              id="priority"
-              name="priority"
-              defaultValue={project?.priority ?? "medium"}
-            >
-              {PRIORITIES.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="status">Status</Label>
-            <Select
-              id="status"
-              name="status"
-              defaultValue={project?.status ?? "planning"}
-            >
-              {PROJECT_STATUSES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="progress">Progress %</Label>
-            <Input
-              id="progress"
-              name="progress"
-              type="number"
-              min={0}
-              max={100}
-              defaultValue={project?.progress ?? 0}
-            />
+          <div className="sm:col-span-2 rounded-xl border border-brand/20 bg-brand-soft/20 p-4">
+            <p className="mb-3 text-sm font-semibold text-foreground">
+              Status · Progress · Priority
+            </p>
+            <p className="mb-4 text-xs text-muted">
+              Change these values and click Update Project — client portal will
+              show the new progress.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="status">Status *</Label>
+                <Select
+                  id="status"
+                  name="status"
+                  required
+                  defaultValue={project?.status ?? "planning"}
+                >
+                  {PROJECT_STATUSES.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="progress">Progress % *</Label>
+                <Input
+                  id="progress"
+                  name="progress"
+                  type="number"
+                  min={0}
+                  max={100}
+                  required
+                  defaultValue={project?.progress ?? 0}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="priority">Priority *</Label>
+                <Select
+                  id="priority"
+                  name="priority"
+                  required
+                  defaultValue={project?.priority ?? "medium"}
+                >
+                  {PRIORITIES.map((p) => (
+                    <option key={p.value} value={p.value}>
+                      {p.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </div>
           </div>
           <div className="space-y-2 sm:col-span-2">
             <Label htmlFor="description">Description</Label>

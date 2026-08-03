@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { requireProfile } from "@/lib/auth";
 import { logActivity } from "@/lib/activity";
 import { hasPermission } from "@/lib/rbac";
@@ -9,6 +8,7 @@ import { CompanyModel, newId, toIso } from "@/lib/db/models";
 import { companySchema } from "@/lib/validations";
 import type { ActionResult } from "@/core/types/result";
 import { PAGE_SIZE } from "@/lib/constants";
+import { CACHE_TTL, CRM_TAGS, cachedQuery, bustCompanies } from "@/lib/cache";
 
 export async function getCompanies(params?: {
   page?: number;
@@ -16,36 +16,50 @@ export async function getCompanies(params?: {
 }) {
   const { requireStaffProfile } = await import("@/lib/auth/require-staff");
   await requireStaffProfile();
-  await connectMongo();
-  const page = params?.page ?? 1;
-  const filter: Record<string, unknown> = { deleted_at: null };
 
-  if (params?.search) {
-    filter.$or = [
-      { name: { $regex: params.search, $options: "i" } },
-      { industry: { $regex: params.search, $options: "i" } },
-    ];
-  }
+  return cachedQuery(
+    ["companies-list", String(params?.page ?? 1), params?.search ?? ""],
+    [CRM_TAGS.companies],
+    async () => {
+      await connectMongo();
+      const page = params?.page ?? 1;
+      const filter: Record<string, unknown> = { deleted_at: null };
 
-  const count = await CompanyModel.countDocuments(filter);
-  const rows = await CompanyModel.find(filter)
-    .sort({ created_at: -1 })
-    .skip((page - 1) * PAGE_SIZE)
-    .limit(PAGE_SIZE)
-    .lean();
+      if (params?.search) {
+        filter.$or = [
+          { name: { $regex: params.search, $options: "i" } },
+          { industry: { $regex: params.search, $options: "i" } },
+        ];
+      }
 
-  return {
-    data: rows.map((c) => ({
-      ...c,
-      created_at: toIso(c.created_at) ?? new Date().toISOString(),
-      updated_at: toIso(c.updated_at) ?? new Date().toISOString(),
-      deleted_at: toIso(c.deleted_at),
-    })),
-    count,
-    page,
-    pageSize: PAGE_SIZE,
-    totalPages: Math.max(1, Math.ceil(count / PAGE_SIZE)),
-  };
+      const count = await CompanyModel.countDocuments(filter);
+      const rows = await CompanyModel.find(filter)
+        .sort({ created_at: -1 })
+        .skip((page - 1) * PAGE_SIZE)
+        .limit(PAGE_SIZE)
+        .lean();
+
+      return {
+        data: rows.map((c) => ({
+          id: String(c.id),
+          name: String(c.name),
+          industry: c.industry ? String(c.industry) : null,
+          website: c.website ? String(c.website) : null,
+          phone: c.phone ? String(c.phone) : null,
+          email: c.email ? String(c.email) : null,
+          address: c.address ? String(c.address) : null,
+          created_at: toIso(c.created_at) ?? new Date().toISOString(),
+          updated_at: toIso(c.updated_at) ?? new Date().toISOString(),
+          deleted_at: toIso(c.deleted_at),
+        })),
+        count,
+        page,
+        pageSize: PAGE_SIZE,
+        totalPages: Math.max(1, Math.ceil(count / PAGE_SIZE)),
+      };
+    },
+    CACHE_TTL.list
+  );
 }
 
 export async function getAllCompanies() {
@@ -98,7 +112,7 @@ export async function createCompanyAction(
     metadata: { name: parsed.data.name },
   });
 
-  revalidatePath("/companies");
+  bustCompanies();
   return { success: true, data: { id } };
 }
 
@@ -141,7 +155,7 @@ export async function updateCompanyAction(
     entity_id: id,
   });
 
-  revalidatePath("/companies");
+  bustCompanies();
   return { success: true };
 }
 
@@ -153,6 +167,6 @@ export async function softDeleteCompanyAction(id: string): Promise<ActionResult>
 
   await connectMongo();
   await CompanyModel.updateOne({ id }, { deleted_at: new Date() });
-  revalidatePath("/companies");
+  bustCompanies();
   return { success: true };
 }

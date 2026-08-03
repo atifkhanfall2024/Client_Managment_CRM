@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import type { UserRole } from "@/types/database";
@@ -65,14 +66,17 @@ export async function clearSessionCookie() {
   cookieStore.delete(SESSION_COOKIE);
 }
 
-export async function getSession(): Promise<SessionPayload | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(SESSION_COOKIE)?.value;
-  if (!token) return null;
+/** Deduped per RSC request — layout + pages share one JWT verify. */
+export const getSession = cache(
+  async (): Promise<SessionPayload | null> => {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(SESSION_COOKIE)?.value;
+    if (!token) return null;
 
-  try {
-    return await verifySessionToken(token);
-  } catch {
-    return null;
+    try {
+      return await verifySessionToken(token);
+    } catch {
+      return null;
+    }
   }
-}
+);

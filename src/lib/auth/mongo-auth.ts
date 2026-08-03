@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { hash, compare } from "bcryptjs";
 import { randomInt, randomUUID } from "crypto";
 import { redirect } from "next/navigation";
@@ -49,37 +50,39 @@ export async function getSessionUser() {
   return getSession();
 }
 
-export async function getCurrentProfile(): Promise<Profile | null> {
-  await ensureSuperAdmin();
-  const session = await getSession();
-  if (!session) return null;
+/** Deduped per RSC request — avoids repeat Mongo lookups on layout + page. */
+export const getCurrentProfile = cache(
+  async (): Promise<Profile | null> => {
+    const session = await getSession();
+    if (!session) return null;
 
-  await connectMongo();
-  const user = await UserModel.findOne({
-    id: session.sub,
-    deleted_at: null,
-  }).lean();
+    await connectMongo();
+    const user = await UserModel.findOne({
+      id: session.sub,
+      deleted_at: null,
+    }).lean();
 
-  if (!user || !user.is_active) return null;
+    if (!user || !user.is_active) return null;
 
-  return toProfile({
-    id: String(user.id),
-    email: user.email,
-    full_name: user.full_name,
-    role: user.role as UserRole,
-    phone: user.phone,
-    avatar_url: user.avatar_url,
-    is_active: user.is_active,
-    approval_status: (user.approval_status as ApprovalStatus) ?? "pending",
-    approved_by: user.approved_by,
-    reports_to: user.reports_to,
-    deleted_at: user.deleted_at,
-    created_at: user.created_at as Date | undefined,
-    updated_at: user.updated_at as Date | undefined,
-  });
-}
+    return toProfile({
+      id: String(user.id),
+      email: user.email,
+      full_name: user.full_name,
+      role: user.role as UserRole,
+      phone: user.phone,
+      avatar_url: user.avatar_url,
+      is_active: user.is_active,
+      approval_status: (user.approval_status as ApprovalStatus) ?? "pending",
+      approved_by: user.approved_by,
+      reports_to: user.reports_to,
+      deleted_at: user.deleted_at,
+      created_at: user.created_at as Date | undefined,
+      updated_at: user.updated_at as Date | undefined,
+    });
+  }
+);
 
-export async function requireProfile() {
+export const requireProfile = cache(async () => {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (!profile.is_active) redirect("/login?error=inactive");
@@ -90,7 +93,7 @@ export async function requireProfile() {
     redirect("/pending");
   }
   return profile;
-}
+});
 
 export async function requireAnySessionProfile() {
   const profile = await getCurrentProfile();

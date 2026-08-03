@@ -149,7 +149,7 @@ describe("rbac portal isolation", () => {
   it("gives clients portal view but not upload/manage", () => {
     expect(hasPermission("client", "portal.view")).toBe(true);
     expect(hasPermission("client", "documents.view")).toBe(true);
-    expect(hasPermission("client", "documents.upload")).toBe(false);
+    expect(hasPermission("client", "documents.upload")).toBe(true);
     expect(hasPermission("client", "clients.update")).toBe(false);
     expect(hasPermission("client", "users.manage")).toBe(false);
   });

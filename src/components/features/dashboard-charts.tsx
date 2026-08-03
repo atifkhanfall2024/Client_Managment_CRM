@@ -95,7 +95,7 @@ export function StatusPieChart({
                 paddingAngle={4}
                 cornerRadius={6}
                 animationBegin={0}
-                animationDuration={1000}
+                isAnimationActive={false}
               >
                 {chartData.map((_, i) => (
                   <Cell
@@ -182,7 +182,7 @@ export function StatusBarChart({
                 name="Count"
                 fill="url(#barGrad)"
                 radius={[10, 10, 4, 4]}
-                animationDuration={1000}
+                isAnimationActive={false}
               >
                 {data.map((_, i) => (
                   <Cell key={i} fill={COLORS[i % COLORS.length]} />
@@ -243,7 +243,7 @@ export function PipelineAreaChart({
                 stroke="#24548c"
                 strokeWidth={3}
                 fill="url(#pipelineFill)"
-                animationDuration={1100}
+                isAnimationActive={false}
                 activeDot={{ r: 5, fill: "#3a6ea5" }}
               />
             </AreaChart>
@@ -300,7 +300,7 @@ export function MonthlyTrendChart({
                 strokeWidth={3}
                 dot={{ r: 4, fill: "#24548c" }}
                 activeDot={{ r: 6 }}
-                animationDuration={1200}
+                isAnimationActive={false}
               />
               <Line
                 type="monotone"
@@ -310,7 +310,7 @@ export function MonthlyTrendChart({
                 strokeWidth={3}
                 strokeDasharray="6 4"
                 dot={{ r: 4, fill: "#6b93c4" }}
-                animationDuration={1200}
+                isAnimationActive={false}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -360,7 +360,7 @@ export function BudgetMixChart({
                 dataKey="value"
                 name="Amount"
                 radius={[0, 10, 10, 0]}
-                animationDuration={1000}
+                isAnimationActive={false}
               >
                 {data.map((_, i) => (
                   <Cell key={i} fill={COLORS[i % COLORS.length]} />
@@ -419,7 +419,7 @@ export function ProgressLeadersChart({
                 name="Progress %"
                 fill="#3a6ea5"
                 radius={[0, 8, 8, 0]}
-                animationDuration={1100}
+                isAnimationActive={false}
               />
             </BarChart>
           </ResponsiveContainer>
@@ -466,7 +466,7 @@ export function CompletionGauge({
               background={{ fill: "var(--brand-soft)" }}
               dataKey="value"
               cornerRadius={10}
-              animationDuration={1200}
+              isAnimationActive={false}
             />
           </RadialBarChart>
         </ResponsiveContainer>
@@ -527,7 +527,7 @@ export function TeamPerformanceChart({
                 stackId="a"
                 fill="#24548c"
                 radius={[0, 0, 0, 0]}
-                animationDuration={1000}
+                isAnimationActive={false}
               />
               <Bar
                 dataKey="remaining"
@@ -535,7 +535,7 @@ export function TeamPerformanceChart({
                 stackId="a"
                 fill="#94a8c0"
                 radius={[8, 8, 0, 0]}
-                animationDuration={1000}
+                isAnimationActive={false}
               />
             </BarChart>
           </ResponsiveContainer>
